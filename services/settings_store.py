@@ -19,6 +19,11 @@ from services.settings_constants import (
     DEFAULT_PROVIDER_NAME,
 )
 
+
+import logging
+
+logger = logging.getLogger(__name__)
+
 SETTINGS_FILE = Path(settings.SETTINGS_FILE)
 GLOBAL_SETTINGS_ID = "global_config"
 SETTINGS_CACHE_TTL_SECONDS: float = 5.0
@@ -127,7 +132,7 @@ def remove_legacy_settings_file() -> None:
     try:
         SETTINGS_FILE.unlink()
     except Exception as exc:
-        print(f"[Settings WARN] Failed to remove stale settings file {SETTINGS_FILE}: {exc}")
+        logger.warning(f"[Settings WARN] Failed to remove stale settings file {SETTINGS_FILE}: {exc}")
 
 
 async def get_active_provider() -> Optional[dict]:

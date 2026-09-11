@@ -33,23 +33,13 @@ export default function EvaluationRadar({ evaluations, streaming = false }) {
         {gridLevels.map((level) => {
           const pts = Array.from({ length: n }, (_, i) => polar(i * step, (level / 10) * R));
           const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
-          return (
-            <path key={level} d={d} fill="none" stroke="rgba(44,24,16,0.12)" strokeWidth="1" />
-          );
+          return <path key={level} d={d} fill="none" stroke="rgba(44,24,16,0.12)" strokeWidth="1" />;
         })}
 
         {EVALUATION_DIMS.map((_, i) => {
           const outer = polar(i * step, R);
           return (
-            <line
-              key={i}
-              x1={CX}
-              y1={CY}
-              x2={outer.x}
-              y2={outer.y}
-              stroke="rgba(44,24,16,0.15)"
-              strokeWidth="1"
-            />
+            <line key={i} x1={CX} y1={CY} x2={outer.x} y2={outer.y} stroke="rgba(44,24,16,0.15)" strokeWidth="1" />
           );
         })}
 
@@ -63,9 +53,7 @@ export default function EvaluationRadar({ evaluations, streaming = false }) {
           />
         )}
 
-        {hasAny && dataPoints.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r="4" fill="var(--vermilion)" />
-        ))}
+        {hasAny && dataPoints.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="4" fill="var(--vermilion)" />)}
 
         {EVALUATION_DIMS.map(({ label }, i) => {
           const pos = polar(i * step, R + 22);
@@ -84,9 +72,7 @@ export default function EvaluationRadar({ evaluations, streaming = false }) {
         })}
       </svg>
 
-      {streaming && !hasAny && (
-        <div className="eval-radar-placeholder">编辑智能体评分生成中…</div>
-      )}
+      {streaming && !hasAny && <div className="eval-radar-placeholder">编辑智能体评分生成中…</div>}
 
       {hasAny && (
         <div className="eval-radar-scores">
@@ -98,10 +84,10 @@ export default function EvaluationRadar({ evaluations, streaming = false }) {
             return (
               <div key={key} className="eval-radar-score-row">
                 <span className="eval-radar-score-label">{label}</span>
-                <span className="eval-radar-score-value" style={{ color }}>{score}/10</span>
-                {dim?.reason && (
-                  <p className="eval-radar-score-reason">{dim.reason}</p>
-                )}
+                <span className="eval-radar-score-value" style={{ color }}>
+                  {score}/10
+                </span>
+                {dim?.reason && <p className="eval-radar-score-reason">{dim.reason}</p>}
               </div>
             );
           })}

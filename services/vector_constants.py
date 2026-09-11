@@ -1,18 +1,18 @@
 """Vector store and embedding constants."""
 
 AGENT_NAME_EMBEDDING: str = "embedding"
-TOKENS_PER_MILLION: float = 1_000_000.0
-ALL_MODELS_LABEL: str = "All Models"
 
 VECTOR_COLLECTION_PREFIX: str = "project_"
 VECTOR_SOURCE_SETTING: str = "setting"
 VECTOR_SOURCE_CHAPTER_EXTRACT: str = "chapter_extract"
+VECTOR_SOURCE_SCENE_BLOCK: str = "scene_block"
+VECTOR_SCENE_BLOCK_ITEM_ID_TEMPLATE: str = "scene_{project_id}_{scope_type}_{scope_key}"
+VECTOR_TYPE_CHARACTER_STATE: str = "character_state"
+VECTOR_SETTING_CHARACTER_ID_TEMPLATE: str = "setting_character_{name}"
+VECTOR_CHAPTER_ITEM_ID_TEMPLATE: str = "{chapter_index}_{item_type}_{name}"
+VECTOR_UNKNOWN_ITEM_TYPE: str = "unknown"
+VECTOR_UNKNOWN_CHAPTER_INDEX: int = 0
 VECTOR_RETRIEVE_N_RESULTS: int = 5
-VECTOR_QUERY_TEXT_MAX_CHARS: int = 2000
-VECTOR_OUTBOX_BATCH_SIZE: int = 10
-DEFAULT_VECTOR_OUTBOX_MAX_RETRIES: int = 3
-
-EMBEDDING_TIMEOUT_SECONDS: int = 120
 
 VECTOR_CHAPTER_EXTRACTS_N_RESULTS: int = 6
 VECTOR_CHARACTER_QUERY_N_RESULTS: int = 3

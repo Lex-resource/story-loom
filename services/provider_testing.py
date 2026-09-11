@@ -1,13 +1,60 @@
 from __future__ import annotations
 
+import ipaddress
+import socket
 from typing import Any, Dict, Optional, Tuple
+from urllib.parse import urlsplit
 
 import httpx
 
 from services.settings_constants import PROVIDER_TEST_MAX_TOKENS, PROVIDER_TEST_TIMEOUT_SECONDS
 from services.settings_models import TestProviderRequest
 
+
+import logging
+
+logger = logging.getLogger(__name__)
+
 __test__ = False
+
+
+def validate_provider_base_url(base_url: str, *, resolve_dns: bool = True) -> str:
+    """Validate a provider target before sending credentials to it."""
+    value = base_url.strip()
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("API 地址必须是 http 或 https URL")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("API 地址不得包含用户信息、查询参数或片段")
+    hostname = parsed.hostname.rstrip(".").lower()
+    if hostname in {"localhost", "local", "ip6-localhost"} or hostname.endswith(".localhost"):
+        raise ValueError("API 地址必须指向公网主机")
+    try:
+        literal = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        addresses = {literal}
+    elif not resolve_dns:
+        return value
+    else:
+        try:
+            addresses = {
+                ipaddress.ip_address(item[4][0])
+                for item in socket.getaddrinfo(parsed.hostname, parsed.port, type=socket.SOCK_STREAM)
+            }
+        except (OSError, ValueError):
+            raise ValueError("API 地址无法解析")
+    if not addresses or any(
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_reserved
+        or address.is_unspecified
+        for address in addresses
+    ):
+        raise ValueError("API 地址必须指向公网主机")
+    return value
 
 
 async def try_provider_request(
@@ -17,12 +64,19 @@ async def try_provider_request(
     api_key: str,
     json_data: Optional[Dict] = None,
 ) -> Tuple[Dict[str, Any], str]:
-    base_url = base_url.strip()
+    try:
+        base_url = validate_provider_base_url(base_url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, base_url.strip()
     api_key = api_key.strip()
 
     async def make_request(url: str):
         try:
-            async with httpx.AsyncClient(timeout=PROVIDER_TEST_TIMEOUT_SECONDS, trust_env=False) as client:
+            async with httpx.AsyncClient(
+                timeout=PROVIDER_TEST_TIMEOUT_SECONDS,
+                trust_env=False,
+                follow_redirects=False,
+            ) as client:
                 headers = {"Authorization": f"Bearer {api_key}"}
                 if json_data:
                     headers["Content-Type"] = "application/json"
@@ -40,7 +94,7 @@ async def try_provider_request(
                         data = response.json()
                         return {"ok": True, "data": data}
                     except Exception as exc:
-                        print(f"[Settings WARN] Failed to parse provider response JSON: {exc}")
+                        logger.warning(f"[Settings WARN] Failed to parse provider response JSON: {exc}")
                 return {"ok": False, "error": f"HTTP {response.status_code}: {response.text[:200]}"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -51,6 +105,10 @@ async def try_provider_request(
 
     if not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
         alt_url = base_url.rstrip("/") + "/v1"
+        try:
+            validate_provider_base_url(alt_url)
+        except ValueError:
+            return result, base_url
         alt_result = await make_request(alt_url)
         if alt_result["ok"]:
             return alt_result, alt_url

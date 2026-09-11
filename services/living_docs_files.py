@@ -8,6 +8,11 @@ from config import settings
 from services.novel_constants import CHAPTER_VERSION_DIR_TEMPLATE
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 DOCS_DIR = Path(settings.LIVING_DOCS_DIR)
 
 
@@ -78,7 +83,7 @@ def read_graph(project_id: str) -> Optional[dict]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        print(f"[LivingDocs WARN] Failed to parse graph JSON for {project_id}: {exc}")
+        logger.warning(f"[LivingDocs WARN] Failed to parse graph JSON for {project_id}: {exc}")
         return None
 
 
@@ -95,4 +100,4 @@ def delete_graph(project_id: str) -> None:
         try:
             path.unlink()
         except Exception as exc:
-            print(f"[LivingDocs WARN] Failed to delete graph for {project_id}: {exc}")
+            logger.warning(f"[LivingDocs WARN] Failed to delete graph for {project_id}: {exc}")

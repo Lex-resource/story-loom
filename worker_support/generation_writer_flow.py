@@ -17,6 +17,15 @@ from worker_support.chapter_repository import get_chapter_by_index
 from worker_support.context import MemoryManager
 from worker_support.generation_context import with_short_term_context, writer_query_from_outline
 from worker_support.generation_validator_policy import target_word_count_for
+from services.character_context import build_writer_character_context
+from services.chapter_continuity import writer_execution_brief
+from services.context_compaction import context_budget_for
+from services.continuity_contract import (
+    contract_prompt,
+    prompt_outline_for_agent,
+    sanitize_outline_for_contract,
+)
+from services.novel_memory_recall import remove_authority_duplicates
 
 
 @dataclass
@@ -38,7 +47,42 @@ async def load_writer_context(
         chapter_index,
         writer_query,
         outline_data,
+        agent_type="writer",
     )
+    memory["character_card_context"] = await build_writer_character_context(
+        db,
+        novel.id,
+        chapter_index,
+        outline_data.get("characters_involved", []),
+    )
+    memory["novel_memory_context"] = remove_authority_duplicates(
+        memory.get("character_card_context", ""),
+        memory.get("novel_memory_context", ""),
+        context_budget_for("writer").memory_chars,
+    )
+    outline_data, memory["chapter_contract"] = sanitize_outline_for_contract(
+        outline_data,
+        memory.get("chapter_handoff"),
+    )
+    memory["chapter_outline"] = prompt_outline_for_agent(
+        outline_data, agent_type="writer"
+    )
+    memory["chapter_contract_context"] = contract_prompt(
+        memory["chapter_contract"], agent_type="writer"
+    )
+    memory["writer_execution_brief_context"] = writer_execution_brief(
+        memory.get("chapter_handoff"),
+        memory.get("chapter_contract"),
+        novel_format=novel.novel_format,
+        outline=outline_data,
+    )
+    memory.setdefault("context_sources", {})["writer_execution_brief_context"] = {
+        "source_ref": f"chapter:{chapter_index}:writer-execution-brief",
+        "source_chapter": chapter_index,
+        "authority": "accepted_projection",
+    }
+    memory["chapter_handoff_context"] = ""
+    memory["chapter_contract_context"] = ""
     pipeline = PipelineContext.from_memory(str(novel.id), chapter_index, memory)
     return WriterContext(memory=memory, pipeline=pipeline)
 
@@ -48,12 +92,26 @@ def prepare_writer_pipeline_context(
     skeleton: dict,
     outline_data: dict,
 ) -> PipelineContext:
-    pipeline_context.previous_ending = with_short_term_context(
-        pipeline_context.previous_ending,
-        pipeline_context.short_term_context,
+    outline_data, contract = sanitize_outline_for_contract(
+        outline_data,
+        pipeline_context.chapter_handoff,
     )
     pipeline_context.global_outline = skeleton
-    pipeline_context.chapter_outline = outline_data
+    pipeline_context.chapter_outline = prompt_outline_for_agent(
+        outline_data, agent_type="writer"
+    )
+    pipeline_context.chapter_contract = contract
+    pipeline_context.chapter_contract_context = contract_prompt(
+        contract, agent_type="writer"
+    )
+    pipeline_context.writer_execution_brief_context = writer_execution_brief(
+        pipeline_context.chapter_handoff,
+        contract,
+        novel_format=pipeline_context.novel_format,
+        outline=outline_data,
+    )
+    pipeline_context.chapter_handoff_context = ""
+    pipeline_context.chapter_contract_context = ""
     return pipeline_context
 
 
@@ -99,7 +157,7 @@ async def run_writer_draft(
 ) -> str:
     prepared_context = prepare_writer_pipeline_context(pipeline_context, skeleton, outline_data)
     inputs = {
-        "chapter_outline": outline_data,
+        "chapter_outline": prepared_context.chapter_outline,
         "skeleton": skeleton,
         "issue_summaries": issue_summaries,
         "word_count": target_word_count_for(novel),

@@ -4,6 +4,10 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // 显式清空 outDir:否则哈希chunk跨代累积,5代陈旧产物会堆满 dist/assets
+    emptyOutDir: true,
+  },
   server: {
     proxy: {
       '/api': {

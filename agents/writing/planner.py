@@ -10,17 +10,28 @@ from agents.constants import (
     PROMPT_PLANNER_CHAT_MODIFY_OUTLINE,
     PROMPT_PLANNER_OPTIMIZE_SKELETON_OUTLINE,
     PROMPT_PLANNER_REVIEW_ACT_RHYTHM,
+    CHARACTER_FACT_SOURCE_RULES,
 )
 from agents.prompt_hints import (
     append_missing_hints,
+    authority_boundary_hint,
+    chapter_contract_output_requirements,
+    compact_layered_prompt,
+    continuity_contract_hint,
+    continuity_handoff_hint,
+    generation_hints as agent_generation_hints,
     hint_block,
     intervention_hint,
+    narrative_index_hint,
+    novel_memory_hint,
+    previous_ending_for_prompt,
     reference_style_hint,
 )
 from services.outline_hierarchy import (
     format_active_volume_hint,
     select_active_volume,
 )
+from services.workflow_surface import is_short_form_workflow
 
 LONG_FORM_STRUCTURE_REQUIREMENTS = """
 
@@ -56,9 +67,11 @@ class PlannerAgent(AgentBase):
             category=novel_format
         )
 
-        if novel_format == "long_webnovel":
+        # 长篇结构要求（创作契约 + 卷纲）按**表面策略**给，不按格式名 —— 克隆自长篇的
+        # 自定义工作流同样需要它，否则骨架里没有契约与卷纲，后续卷级通读无处落脚。
+        if not is_short_form_workflow(novel_format):
             system_tmpl += LONG_FORM_STRUCTURE_REQUIREMENTS
-        sys_prompt = system_tmpl + UNTRUSTED_CONTENT_SYSTEM_REMINDER
+        sys_prompt = system_tmpl + CHARACTER_FACT_SOURCE_RULES + UNTRUSTED_CONTENT_SYSTEM_REMINDER
 
         # safe_format tolerates placeholders missing from the template; for
         # optional hints absent from the template, also append them at the end
@@ -123,7 +136,10 @@ class PlannerAgent(AgentBase):
     ) -> dict:
         skeleton = context.global_outline or {}
         chapter_index = context.chapter_index
-        previous_ending = context.previous_ending
+        previous_ending = previous_ending_for_prompt(
+            context.previous_ending,
+            context.chapter_handoff_context,
+        )
         active_entities_context = (
             f"【世界状态】\n{sanitize_untrusted_content(context.world_state)}\n\n"
             f"【人物状态】\n{sanitize_untrusted_content(context.character_state)}\n\n"
@@ -146,8 +162,24 @@ class PlannerAgent(AgentBase):
         )
         active_volume = select_active_volume(skeleton, chapter_index)
         active_volume_hint_value = format_active_volume_hint(active_volume)
+        character_manifest_hint_value = hint_block(
+            "【角色人物志（数据库摘要，只能用于选择角色和生成本章角色目标）】",
+            context.character_manifest_context,
+        )
+        novel_memory_hint_value = novel_memory_hint(context.novel_memory_context, "planner")
+        handoff_hint_value = continuity_handoff_hint(context.chapter_handoff_context)
+        contract_hint_value = continuity_contract_hint(context.chapter_contract_context)
+        narrative_index_hint_value = narrative_index_hint(context.narrative_index_context, "planner")
 
-        sys_prompt = system_tmpl + UNTRUSTED_CONTENT_SYSTEM_REMINDER
+        continuity_instructions = chapter_contract_output_requirements(novel_format)
+        generation_hints = agent_generation_hints("planner", novel_format)
+        sys_prompt = (
+            system_tmpl
+            + continuity_instructions
+            + authority_boundary_hint()
+            + generation_hints
+            + UNTRUSTED_CONTENT_SYSTEM_REMINDER
+        )
         user_prompt = safe_format(
             user_tmpl,
             skeleton=skeleton,
@@ -161,6 +193,11 @@ class PlannerAgent(AgentBase):
             intervention_hint=intervention_hint_value,
             reference_style_hint=reference_style_hint_value,
             active_volume_hint=active_volume_hint_value,
+            character_manifest_context=character_manifest_hint_value,
+            novel_memory_hint=novel_memory_hint_value,
+            chapter_handoff_context=handoff_hint_value,
+            chapter_contract_context=contract_hint_value,
+            narrative_index_context=narrative_index_hint_value,
         )
         user_prompt = append_missing_hints(
             user_prompt,
@@ -169,7 +206,13 @@ class PlannerAgent(AgentBase):
             reference_style_hint=reference_style_hint_value,
             full_manuscript_context=full_manuscript_context_hint,
             active_volume_hint=active_volume_hint_value,
+            character_manifest_context=character_manifest_hint_value,
+            novel_memory_hint=novel_memory_hint_value,
+            chapter_handoff_context=handoff_hint_value,
+            chapter_contract_context=contract_hint_value,
+            narrative_index_context=narrative_index_hint_value,
         )
+        user_prompt = compact_layered_prompt(user_prompt)
 
         return await self.call_llm_json(sys_prompt, user_prompt, response_schema=PlannerChapterOutlineResponse, on_chunk=on_chunk)
 
@@ -207,7 +250,7 @@ class PlannerAgent(AgentBase):
             category=novel_format
         )
 
-        if novel_format == "long_webnovel":
+        if not is_short_form_workflow(novel_format):
             system_tmpl += LONG_FORM_STRUCTURE_REQUIREMENTS + LONG_FORM_OPTIMIZATION_GUARD
 
         sys_prompt = system_tmpl + UNTRUSTED_CONTENT_SYSTEM_REMINDER

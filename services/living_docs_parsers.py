@@ -1,9 +1,15 @@
 """Living-docs 内容解析器。
 
 从 services/vector_store.py 抽取，因为这些函数解析的是 living-docs 的 JSON-lines 格式，
-属于 living-docs 领域而非向量存储。vector_store 与 worker_support/merger 均从此导入。
+属于 living-docs 领域而非向量存储。vector_store / vector_retrieval / vector_settings_index
+均从此导入。
 """
 import json
+
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def parse_character_state(content: str) -> list[tuple[str, str]]:
@@ -43,7 +49,7 @@ def parse_character_state(content: str) -> list[tuple[str, str]]:
             name = data.get("name", "未命名")
             results.append((name, json.dumps(data, ensure_ascii=False)))
         except Exception as je:
-            print(f"[LivingDocsParsers WARN] Failed to parse character_state line: {line[:80]!r} — {je}")
+            logger.warning(f"[LivingDocsParsers WARN] Failed to parse character_state line: {line[:80]!r} — {je}")
     return results
 
 

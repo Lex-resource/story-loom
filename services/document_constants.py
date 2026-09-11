@@ -18,6 +18,15 @@ KNOWLEDGE_DOC_TYPES: tuple[str, ...] = (
 
 OUTLINE_DOC_TYPES: tuple[str, ...] = ("global_outline", "act_outline")
 
+# Author-facing documents are stored and edited as Markdown. Knowledge docs
+# still keep their structured PostgreSQL rows as the source of truth.
+MARKDOWN_DOC_TYPES: tuple[str, ...] = (
+    "global_outline",
+    "act_outline",
+    "character_state",
+    "world_state",
+)
+
 DOC_TYPE_WORLD_STATE: str = "world_state"
 DOC_TYPE_CHARACTER_STATE: str = "character_state"
 DOC_TYPE_FORESHADOWING: str = "foreshadowing"

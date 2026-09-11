@@ -1,7 +1,14 @@
 import React, { useMemo } from 'react';
-import { Loader2, ArrowUp, ArrowDown, Trash2, Plus, BookOpen } from 'lucide-react';
-import { moveKeyEvent as moveOutlineKeyEvent, normalizeOutlineText, parseOutlineText, updateOutlineJson } from './outline/outlineModel';
+import { Loader2, ArrowUp, ArrowDown, Trash2, Plus, RefreshCw } from 'lucide-react';
+import {
+  moveKeyEvent as moveOutlineKeyEvent,
+  normalizeOutlineText,
+  parseOutlineText,
+  updateOutlineJson,
+} from './outline/outlineModel';
 import OutlineSkeletonVisual from './outline/OutlineSkeletonVisual';
+import { outlineApi } from '../../services/novelApi';
+import { createRequestGuard } from '../../utils/requestLifecycle';
 
 export default function WorkspaceOutline({
   workspaceStep,
@@ -13,16 +20,20 @@ export default function WorkspaceOutline({
   isOutlineStreaming,
   isSkeletonStreaming,
   activeProject,
-  API_BASE,
   handleDeleteChapter,
+  handleRewriteOutline,
+  actionLoading,
   isGenerating,
-  onOpenChapterOverview
 }) {
   const isSkeleton = workspaceStep === 'structure' || !activeChapter;
   const [fetchingSkeleton, setFetchingSkeleton] = React.useState(false);
+  const outlineRequestGuardRef = React.useRef(null);
+  if (!outlineRequestGuardRef.current) outlineRequestGuardRef.current = createRequestGuard();
   const [outlineTab, setOutlineTab] = React.useState('basic'); // 'basic' | 'arcs' | 'characters' | 'world' | 'foreshadowing'
   const skeletonScrollRef = React.useRef(null);
   const shortOutlineKeys = ['标题', '简介', '总章节数', '关键伏笔', '故事基调'];
+  const activeProjectId = activeProject?.id;
+  const activeProjectOutline = activeProject?.outline;
 
   const pickKey = (obj, keys, fallback) => {
     for (const key of keys) {
@@ -42,36 +53,47 @@ export default function WorkspaceOutline({
   };
 
   const getForeshadowingKey = (obj) => pickKey(obj, ['关键伏笔', '主要伏笔', '核心伏笔'], '关键伏笔');
-  const normalizeList = (value) => Array.isArray(value) ? value : [];
+  const normalizeList = (value) => (Array.isArray(value) ? value : []);
 
   const moveKeyEvent = (idx, direction) => {
     try {
       setEditedOutline(moveOutlineKeyEvent(editedOutline, idx, direction));
     } catch (e) {
-      console.error("Failed to move key event:", e);
+      console.error('Failed to move key event:', e);
     }
   };
 
   // Initialize editedOutline with skeleton if we are in skeleton mode and it's empty
   React.useEffect(() => {
+    outlineRequestGuardRef.current.cancel();
     if (isSkeleton && !isSkeletonStreaming && !editedOutline) {
-      if (activeProject?.outline) {
-        setEditedOutline(typeof activeProject.outline === 'string' ? activeProject.outline : JSON.stringify(activeProject.outline, null, 2));
-      } else if (activeProject?.id && !fetchingSkeleton) {
+      if (activeProjectOutline) {
+        setEditedOutline(
+          typeof activeProjectOutline === 'string'
+            ? activeProjectOutline
+            : JSON.stringify(activeProjectOutline, null, 2),
+        );
+      } else if (activeProjectId && !fetchingSkeleton) {
         // Fetch outline from backend if not present in activeProject object
+        const request = outlineRequestGuardRef.current.start();
         setFetchingSkeleton(true);
-        fetch(`${API_BASE}/writing/${activeProject.id}/outline`)
-          .then(res => res.json())
-          .then(data => {
-            if (data.outline) {
+        outlineApi
+          .get(activeProjectId, { signal: request.signal })
+          .then((data) => {
+            if (request.isCurrent() && data.outline) {
               setEditedOutline(typeof data.outline === 'string' ? data.outline : JSON.stringify(data.outline, null, 2));
             }
           })
-          .catch(e => console.error("Failed to fetch outline:", e))
-          .finally(() => setFetchingSkeleton(false));
+          .catch((e) => {
+            if (request.isCurrent() && e.name !== 'AbortError') console.error('Failed to fetch outline:', e);
+          })
+          .finally(() => {
+            if (request.isCurrent()) setFetchingSkeleton(false);
+          });
       }
     }
-  }, [isSkeleton, isSkeletonStreaming, editedOutline, activeProject, API_BASE, setEditedOutline]);
+    return () => outlineRequestGuardRef.current.cancel();
+  }, [isSkeleton, isSkeletonStreaming, editedOutline, activeProjectId, activeProjectOutline, setEditedOutline]);
 
   // F-19: Memoize JSON.parse so it only re-runs when editedOutline changes, not on every render
   const { outlineObj, parseError } = useMemo(() => {
@@ -110,47 +132,65 @@ export default function WorkspaceOutline({
   if (workspaceStep !== 'planner' && workspaceStep !== 'structure') return null;
   // If no chapter and no streaming and no content, hide it.
   // But if there is content (editedOutline or activeProject.outline) or it's streaming or we are fetching, show it.
-  if (isSkeleton && !isOutlineStreaming && !editedOutline && !isSkeletonStreaming && !activeProject?.outline && !fetchingSkeleton) return null;
+  if (
+    isSkeleton &&
+    !isOutlineStreaming &&
+    !editedOutline &&
+    !isSkeletonStreaming &&
+    !activeProject?.outline &&
+    !fetchingSkeleton
+  )
+    return null;
 
   const updateOutlineField = (field, value) => {
     try {
-      setEditedOutline(updateOutlineJson(editedOutline, (outline) => { outline[field] = value; }));
+      setEditedOutline(
+        updateOutlineJson(editedOutline, (outline) => {
+          outline[field] = value;
+        }),
+      );
     } catch (e) {
-      console.error("Failed to update outline field:", e);
+      console.error('Failed to update outline field:', e);
     }
   };
 
   const updateKeyEvent = (idx, value) => {
     try {
-      setEditedOutline(updateOutlineJson(editedOutline, (outline) => {
-        const events = [...(outline.key_events || [])];
-        events[idx] = value;
-        outline.key_events = events;
-      }));
+      setEditedOutline(
+        updateOutlineJson(editedOutline, (outline) => {
+          const events = [...(outline.key_events || [])];
+          events[idx] = value;
+          outline.key_events = events;
+        }),
+      );
     } catch (e) {
-      console.error("Failed to update key event:", e);
+      console.error('Failed to update key event:', e);
     }
   };
 
   const addKeyEvent = () => {
     try {
-      setEditedOutline(updateOutlineJson(editedOutline, (outline) => {
-        outline.key_events = [...(outline.key_events || []), ''];
-      }));
+      setEditedOutline(
+        updateOutlineJson(editedOutline, (outline) => {
+          outline.key_events = [...(outline.key_events || []), ''];
+        }),
+      );
     } catch (e) {
-      console.error("Failed to add key event:", e);
+      console.error('Failed to add key event:', e);
     }
   };
 
   const removeKeyEvent = (idx) => {
     try {
-      setEditedOutline(updateOutlineJson(editedOutline, (outline) => {
-        const events = [...(outline.key_events || [])];
-        events.splice(idx, 1);
-        outline.key_events = events;
-      }));
+      setEditedOutline(
+        updateOutlineJson(editedOutline, (outline) => {
+          const events = [...(outline.key_events || [])];
+          events.splice(idx, 1);
+          outline.key_events = events;
+        }),
+      );
     } catch (e) {
-      console.error("Failed to remove key event:", e);
+      console.error('Failed to remove key event:', e);
     }
   };
 
@@ -173,49 +213,73 @@ export default function WorkspaceOutline({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0, gap: '12px' }}>
-      <div className="outline-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div
+        className="outline-toolbar"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
         <div className="outline-toolbar-title" style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-          <span>{isSkeleton ? (isSkeletonStreaming ? '全书大纲生成中…' : '全书骨架大纲设定') : '章节大纲策划卷轴'}</span>
+          <span>
+            {isSkeleton ? (isSkeletonStreaming ? '全书大纲生成中…' : '全书骨架大纲设定') : '章节大纲策划卷轴'}
+          </span>
           {isOutlineStreaming && (
             <span className="warning-badge warning pulsing-border" style={{ margin: 0, fontSize: '11px' }}>
               <Loader2 className="animate-spin" size={12} style={{ marginRight: 4 }} />
               {isSkeletonStreaming ? '骨架流式生成中…' : '大纲流式生成中…'}
             </span>
           )}
-          <span className="text-xs text-secondary">在此可视化修改{isSkeleton ? '全书全局设定与各卷大纲' : '章节设定大纲'}，也可以切换 JSON 原文精细干预。</span>
         </div>
         <div className="outline-toolbar-actions" style={{ display: 'flex', gap: '8px' }}>
-          {onOpenChapterOverview && (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ padding: '3px 10px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--gold)' }}
-              onClick={onOpenChapterOverview}
-            >
-              <BookOpen size={12} /> 分章大纲总览
-            </button>
-          )}
-          <button className={`btn ${outlineMode === 'visual' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: '3px 10px', fontSize: '12px' }} onClick={() => setOutlineMode('visual')}>
+          <button
+            className={`btn ${outlineMode === 'visual' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '3px 10px', fontSize: '12px' }}
+            onClick={() => setOutlineMode('visual')}
+          >
             可视化大纲
           </button>
-          <button className={`btn ${outlineMode === 'json' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: '3px 10px', fontSize: '12px' }} onClick={() => setOutlineMode('json')}>
+          <button
+            className={`btn ${outlineMode === 'json' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '3px 10px', fontSize: '12px' }}
+            onClick={() => setOutlineMode('json')}
+          >
             JSON 配置
           </button>
-          {!isSkeleton && activeChapter && !(isGenerating && activeProject?.current_chapter === activeChapter?.chapter_index) && handleDeleteChapter && (
+          {isSkeleton && handleRewriteOutline && (
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => {
-                if (window.confirm(`确定要删除第 ${activeChapter.chapter_index} 章吗？删除后不可恢复。`)) {
-                  handleDeleteChapter(activeChapter.chapter_index);
-                }
-              }}
-              style={{ padding: '3px 10px', fontSize: '12px', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}
-              title="删除此章节"
+              onClick={handleRewriteOutline}
+              disabled={actionLoading || isGenerating || isOutlineStreaming}
+              style={{ padding: '3px 10px', fontSize: '12px' }}
+              title={isGenerating ? '请先暂停创作，再重新规划全书大纲' : '根据当前大纲重新规划全书结构'}
             >
-              删除本章
+              {actionLoading ? <Loader2 className="animate-spin" size={13} /> : <RefreshCw size={13} />}
+              重新大纲
             </button>
           )}
+          {!isSkeleton &&
+            activeChapter &&
+            !(isGenerating && activeProject?.current_chapter === activeChapter?.chapter_index) &&
+            handleDeleteChapter && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  if (window.confirm(`确定要删除第 ${activeChapter.chapter_index} 章吗？删除后不可恢复。`)) {
+                    handleDeleteChapter(activeChapter.chapter_index);
+                  }
+                }}
+                style={{
+                  padding: '3px 10px',
+                  fontSize: '12px',
+                  color: '#ef4444',
+                  borderColor: 'rgba(239, 68, 68, 0.3)',
+                  background: 'rgba(239, 68, 68, 0.05)',
+                }}
+                title="删除此章节"
+              >
+                删除本章
+              </button>
+            )}
         </div>
       </div>
 
@@ -228,18 +292,46 @@ export default function WorkspaceOutline({
           )}
           <textarea
             className="editor-textarea"
-            style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-muted)', borderRadius: '8px', flexGrow: 1 }}
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '13px',
+              background: 'rgba(0,0,0,0.3)',
+              border: '1px solid var(--border-muted)',
+              borderRadius: '8px',
+              flexGrow: 1,
+            }}
             value={editedOutline}
             onChange={(e) => setEditedOutline(e.target.value)}
             readOnly={isOutlineStreaming}
             placeholder={isOutlineStreaming ? '策划智能体正在流式写入大纲 JSON...' : ''}
           />
         </div>
-      ) : isSkeleton ? renderSkeletonVisual() : (
-        <div className="parchment-scroll" style={{ flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', padding: '20px', borderRadius: '12px' }}>
+      ) : isSkeleton ? (
+        renderSkeletonVisual()
+      ) : (
+        <div
+          className="parchment-scroll"
+          style={{
+            flexGrow: 1,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            padding: '20px',
+            borderRadius: '12px',
+          }}
+        >
           <div className="outline-section-card animate-fadeIn">
             <div className="form-group-outline">
-              <label className="form-label-outline" style={{ fontSize: '15px', color: 'var(--vermilion)', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+              <label
+                className="form-label-outline"
+                style={{
+                  fontSize: '15px',
+                  color: 'var(--vermilion)',
+                  borderBottom: '1px solid var(--border)',
+                  paddingBottom: '6px',
+                }}
+              >
                 第 {activeChapter?.chapter_index} 章 章节大纲
               </label>
             </div>
@@ -267,7 +359,9 @@ export default function WorkspaceOutline({
             </div>
 
             <div className="form-group-outline">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}
+              >
                 <label className="form-label-outline">核心事件流与冲突递进 (Key Events Timeline)</label>
                 <button
                   type="button"
@@ -279,17 +373,25 @@ export default function WorkspaceOutline({
                 </button>
               </div>
 
-              {(!outlineObj.key_events || outlineObj.key_events.length === 0) ? (
-                <div style={{ padding: '20px', textAlign: 'center', background: 'var(--cloud)', borderRadius: '8px', border: '1px dashed var(--border)' }}>
-                  <p className="text-secondary text-xs" style={{ margin: 0 }}>暂无剧情节点事件流，请点击右上方按钮进行添加</p>
+              {!outlineObj.key_events || outlineObj.key_events.length === 0 ? (
+                <div
+                  style={{
+                    padding: '20px',
+                    textAlign: 'center',
+                    background: 'var(--cloud)',
+                    borderRadius: '8px',
+                    border: '1px dashed var(--border)',
+                  }}
+                >
+                  <p className="text-secondary text-xs" style={{ margin: 0 }}>
+                    暂无剧情节点事件流，请点击右上方按钮进行添加
+                  </p>
                 </div>
               ) : (
                 <div className="event-timeline">
                   {outlineObj.key_events.map((event, idx) => (
                     <div key={idx} className="event-timeline-item">
-                      <div className="event-number-badge">
-                        {String(idx + 1).padStart(2, '0')}
-                      </div>
+                      <div className="event-number-badge">{String(idx + 1).padStart(2, '0')}</div>
 
                       <div className="event-timeline-card">
                         <div style={{ flexGrow: 1 }}>
@@ -303,7 +405,7 @@ export default function WorkspaceOutline({
                               width: '100%',
                               border: 'none',
                               padding: 0,
-                              background: 'transparent'
+                              background: 'transparent',
                             }}
                             value={event}
                             onChange={(e) => updateKeyEvent(idx, e.target.value)}

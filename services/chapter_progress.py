@@ -18,6 +18,15 @@ ADVANCEABLE_CHAPTER_STATUSES = frozenset(
 )
 
 
+class FrozenChapterError(ValueError):
+    """Raised when a published chapter is sent through a write path."""
+
+
+def assert_chapter_not_frozen(chapter) -> None:
+    if is_frozen(chapter):
+        raise FrozenChapterError("Published chapters are immutable")
+
+
 def is_frozen(chapter) -> bool:
     """Return True if a chapter is published and therefore immutable.
 

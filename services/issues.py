@@ -1,9 +1,36 @@
 import uuid
+from config import settings
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.novel import RawIssue, IssueSummary, Novel
 from agents.writing.issue_classifier import IssueClassifierAgent
 from services.novel_constants import AGENT_NAME_CLASSIFIER, ISSUE_SIMILARITY_THRESHOLD
+
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _normalize_summaries(value) -> list[dict]:
+    """Normalize permissive classifier output before persisting summaries."""
+    if isinstance(value, dict):
+        for key in ("summaries", "issues", "items", "data"):
+            if isinstance(value.get(key), list):
+                value = value[key]
+                break
+        else:
+            value = [value]
+    if not isinstance(value, list):
+        value = [value]
+
+    normalized = []
+    for item in value:
+        if isinstance(item, dict):
+            normalized.append(item)
+        elif isinstance(item, str) and item.strip():
+            normalized.append({"summary": item.strip(), "category": "consistency", "severity": "medium"})
+    return normalized
 
 def is_similar(s1: str, s2: str) -> bool:
     """Return True if two strings are textually similar.
@@ -44,6 +71,12 @@ async def update_project_issue_summaries(db: AsyncSession, project_id: uuid.UUID
     novel = novel_res.scalar_one_or_none()
     if not novel:
         return
+
+    if (
+        settings.NOVEL_MEMORY_CONTEXT_MODE == "layered"
+        and not settings.ENABLE_LEGACY_ISSUE_CLASSIFIER
+    ):
+        return
         
     # 1. Fetch all RawIssue items for the project
     result = await db.execute(
@@ -76,9 +109,11 @@ async def update_project_issue_summaries(db: AsyncSession, project_id: uuid.UUID
         summarized = await classifier.classify_issues(raw_issues_list, novel_format=novel.novel_format)
         await classifier.record_usage(db, project_id, 0, AGENT_NAME_CLASSIFIER)
     except Exception as e:
-        print(f"[Issue Classifier ERROR] Failed to classify issues: {e}")
+        logger.error(f"[Issue Classifier ERROR] Failed to classify issues: {e}")
         return
     
+    summarized = _normalize_summaries(summarized)
+
     # 3. Fetch existing disabled summaries to preserve their disabled status
     existing_disabled_result = await db.execute(
         select(IssueSummary).where(IssueSummary.project_id == project_id, IssueSummary.enabled == False)

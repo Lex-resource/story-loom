@@ -5,7 +5,8 @@ from types import SimpleNamespace
 from main import app
 from models.operations import Job
 from services import project_service
-from services.pipeline_service import GenerateRequest
+from routers.pipeline import GenerateRequest
+from routers.projects import CreateProjectRequest
 from services.pipeline_types import VectorOutboxStatus
 from pydantic import ValidationError
 import pytest
@@ -19,9 +20,12 @@ def test_active_generate_job_has_postgresql_partial_unique_index():
     assert "pending" in predicate and "running" in predicate
 
 
-def test_route_map_uses_rest_intervention_and_exposes_no_secret_get():
+def test_route_map_exposes_generation_controls_and_no_secret_get():
     routes = {(route.path, method) for route in app.routes for method in getattr(route, "methods", set())}
-    assert ("/api/writing/{project_id}/intervention", "POST") in routes
+    assert ("/api/writing/{project_id}/pause", "POST") in routes
+    assert ("/api/writing/{project_id}/resume", "POST") in routes
+    assert ("/api/writing/{project_id}/rewrite", "POST") in routes
+    assert ("/api/writing/{project_id}/intervention", "POST") not in routes
     assert ("/api/settings/api-key", "GET") not in routes
 
 
@@ -61,6 +65,6 @@ def test_vector_outbox_status_values_are_stable():
 
 def test_request_models_reject_blank_projects_and_oversized_batches():
     with pytest.raises(ValidationError):
-        project_service.CreateProjectRequest(title="   ", user_prompt="prompt")
+        CreateProjectRequest(title="   ", user_prompt="prompt")
     with pytest.raises(ValidationError):
         GenerateRequest(batch_size=101)

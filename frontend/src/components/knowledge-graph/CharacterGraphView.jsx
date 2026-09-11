@@ -3,12 +3,9 @@ import KnowledgeGraphCanvas from './KnowledgeGraphCanvas';
 import GraphDetailPanel from './GraphDetailPanel';
 import GraphToolbar from './GraphToolbar';
 import { GRAPH_PHYSICS_OPTIONS } from './graphTheme';
-import {
-  filterBySearch,
-  transformCharacterGraph,
-  toVisCharacterData,
-  graphStats,
-} from './graphTransforms';
+import { knowledgeGraphApi } from '../../services/novelApi';
+import { filterBySearch, transformCharacterGraph, toVisCharacterData, graphStats } from './graphTransforms';
+import { createRequestGuard } from '../../utils/requestLifecycle';
 
 const FILTER_OPTIONS = [
   { id: 'hybrid', label: '混合鸟瞰' },
@@ -23,7 +20,7 @@ const LEGEND_ITEMS = [
   { color: '#2d6a4f', label: '其他势力' },
 ];
 
-export default function CharacterGraphView({ projectId, apiBase }) {
+export default function CharacterGraphView({ projectId }) {
   const [rawData, setRawData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -33,27 +30,27 @@ export default function CharacterGraphView({ projectId, apiBase }) {
 
   useEffect(() => {
     if (!projectId) return;
-    let cancelled = false;
+    const requestGuard = createRequestGuard();
+    const request = requestGuard.start();
     setLoading(true);
     setError(null);
 
-    fetch(`${apiBase}/writing/${projectId}/character-graph`)
-      .then((res) => {
-        if (!res.ok) throw new Error('加载人物图谱失败');
-        return res.json();
-      })
+    knowledgeGraphApi
+      .characterGraph(projectId, { signal: request.signal })
       .then((data) => {
-        if (!cancelled) setRawData(data);
+        if (request.isCurrent()) setRawData(data);
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message);
+        if (request.isCurrent() && err.name !== 'AbortError') setError(err.message);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (request.isCurrent()) setLoading(false);
       });
 
-    return () => { cancelled = true; };
-  }, [projectId, apiBase]);
+    return () => {
+      requestGuard.cancel();
+    };
+  }, [projectId]);
 
   const { visData, stats, sourceNodes } = useMemo(() => {
     if (!rawData) return { visData: null, stats: null, sourceNodes: [] };
@@ -66,30 +63,31 @@ export default function CharacterGraphView({ projectId, apiBase }) {
     };
   }, [rawData, filterMode, search]);
 
-  const handleNodeClick = useCallback((params) => {
-    if (!params.nodes.length || !rawData) {
-      setDetail(null);
-      return;
-    }
-    const node = sourceNodes.find((n) => n.id === params.nodes[0]);
-    if (node && node.group !== 'faction_hub') {
-      setDetail({
-        title: node.label,
-        content: rawData.details?.[node.label] || '暂无详细背景记录',
-      });
-    } else {
-      setDetail(null);
-    }
-  }, [rawData, sourceNodes]);
+  const handleNodeClick = useCallback(
+    (params) => {
+      if (!params.nodes.length || !rawData) {
+        setDetail(null);
+        return;
+      }
+      const node = sourceNodes.find((n) => n.id === params.nodes[0]);
+      if (node && node.group !== 'faction_hub') {
+        setDetail({
+          title: node.label,
+          content: rawData.details?.[node.label] || '暂无详细背景记录',
+        });
+      } else {
+        setDetail(null);
+      }
+    },
+    [rawData, sourceNodes],
+  );
 
   return (
     <div className="kg-view">
       <header className="kg-view-header">
         <div>
           <h3 className="kg-view-title">人物势力图谱</h3>
-          <p className="kg-view-desc">
-            展示小说中出场人物及其关联关系。可切换人际、势力分布或混合视图。
-          </p>
+          <p className="kg-view-desc">展示小说中出场人物及其关联关系。可切换人际、势力分布或混合视图。</p>
         </div>
         <GraphToolbar
           searchValue={search}

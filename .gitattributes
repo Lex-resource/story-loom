@@ -1,0 +1,11 @@
+# 行尾策略:钉住 git 的转换行为,让前端格式门禁(.prettierrc 的 endOfLine:"lf")
+# 不依赖本机 core.autocrlf 配置 —— autocrlf=true 的机器(Windows git 默认)
+# fresh checkout 后前端文件也不会被翻成 CRLF,format:check 永远绿。
+# - * text=auto:git 自动识别文本,入库统一归一为 LF;
+# - frontend/ 工作树强制 LF(与 prettier 一致);
+# - Windows 批处理强制 CRLF(LF 的 .bat 在 goto/多行解析上有已知坑);
+# - 二进制显式声明,不依赖自动识别。
+* text=auto
+frontend/** text eol=lf
+*.bat text eol=crlf
+*.png binary

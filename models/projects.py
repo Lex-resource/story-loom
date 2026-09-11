@@ -15,6 +15,7 @@ class Novel(Base):
     type = Column(String(20))  # reference / project
     novel_format = Column(String(50))
     creative_profile = Column(JSON, nullable=True)
+    character_branch_auto_discovery_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
     readonly_docs = Column(JSON, nullable=True)
     reference_book_id = Column(Uuid, ForeignKey("novels.id", ondelete="SET NULL"), nullable=True)
     target_chapters = Column(Integer)

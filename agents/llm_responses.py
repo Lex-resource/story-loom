@@ -6,11 +6,16 @@ from agents.llm_streaming import ThinkStreamParser
 from agents.prompt_utils import strip_emojis
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 async def consume_streaming_response(response, on_chunk: Optional[Any]) -> tuple[str, Optional[dict]]:
     content_type = response.headers.get("content-type", "")
     if "text/html" in content_type:
         raise ValueError("API response returned HTML instead of stream")
-    response.raise_for_status()
+    await _raise_stream_http_error(response)
 
     full_content = []
     api_usage = None
@@ -44,7 +49,7 @@ async def consume_streaming_response(response, on_chunk: Optional[Any]) -> tuple
                 raise
             parse_errors.append(f"{type(e).__name__}: {e}; raw={_preview(data_str)}")
             if len(parse_errors) <= 3:
-                print(f"[LLM Stream WARN] Failed to parse stream chunk: {parse_errors[-1]}")
+                logger.warning(f"[LLM Stream WARN] Failed to parse stream chunk: {parse_errors[-1]}")
 
     normal, reasoning = parser.flush()
     await _emit_chunk(on_chunk, "reasoning", reasoning)
@@ -77,7 +82,7 @@ def parse_non_streaming_response(response) -> tuple[str, Optional[dict]]:
     content_type = response.headers.get("content-type", "")
     if "text/html" in content_type:
         raise ValueError("API response returned HTML instead of JSON")
-    response.raise_for_status()
+    _raise_http_error(response)
     data = response.json()
     if "error" in data:
         raise ValueError(f"LLM API returned error: {data['error']}")
@@ -121,6 +126,28 @@ async def _emit_chunk(on_chunk: Optional[Any], channel: str, content: str) -> No
         await on_chunk(channel, content)
     else:
         on_chunk(channel, content)
+
+
+async def _raise_stream_http_error(response) -> None:
+    """Expose upstream error bodies before consuming a streaming response."""
+    if getattr(response, "status_code", 200) < 400:
+        return
+    try:
+        await response.aread()
+    except Exception:
+        pass
+    status = getattr(response, "status_code", "unknown")
+    detail = _preview(getattr(response, "text", ""))
+    raise ValueError(f"LLM API HTTP {status}: {detail or 'empty response'}")
+
+
+def _raise_http_error(response) -> None:
+    """Expose upstream error bodies for non-streaming requests."""
+    if getattr(response, "status_code", 200) < 400:
+        return
+    status = getattr(response, "status_code", "unknown")
+    detail = _preview(getattr(response, "text", ""))
+    raise ValueError(f"LLM API HTTP {status}: {detail or 'empty response'}")
 
 
 def _preview(value: str, limit: int = 240) -> str:

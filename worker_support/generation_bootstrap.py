@@ -14,7 +14,6 @@ from services.pipeline_transitions import StateMachine
 from services.pipeline_types import NovelStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 from worker_support.events import GenerationEvents
-from agents.constants import NOVEL_FORMAT_ZHIHU_SHORT
 
 
 class BootstrapOutcome(StrEnum):
@@ -81,9 +80,6 @@ async def bootstrap_skeleton_outline(
         )
         await planner_node.agent.record_usage(db, novel.id, 0, AGENT_PLANNER)
         novel.outline = skeleton
-        if novel.novel_format == NOVEL_FORMAT_ZHIHU_SHORT:
-            from services.short_story_living_docs import sync_short_story_living_docs
-            await sync_short_story_living_docs(db, novel)
         job_params["bootstrap_skeleton"] = False
 
         if novel.mode != "auto":

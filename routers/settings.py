@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -5,10 +7,10 @@ from services.settings_constants import DEFAULT_LLM_BASE_URL
 from services.provider_testing import (
     test_provider_connection_logic,
     list_models_by_provider_logic,
+    validate_provider_base_url,
 )
 from services.settings_models import SettingsData, TestProviderRequest
 from services.settings_store import get_active_provider, load_settings, save_settings as _save_settings
-from services.watchdog_stats import compute_watchdog_p95
 
 router = APIRouter()
 
@@ -46,6 +48,17 @@ async def get_settings():
 @router.post("/settings")
 async def save_settings(data: SettingsData):
     incoming = data.model_dump()
+    for provider in incoming.get("providers", []):
+        try:
+            provider["base_url"] = await asyncio.to_thread(
+                validate_provider_base_url,
+                provider.get("base_url", ""),
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Provider '{provider.get('id', '')}' 的 API 地址无效：{exc}",
+            ) from exc
     existing = await load_settings()
     existing_keys = {provider.get("id"): provider.get("api_key", "") for provider in existing.get("providers", [])}
     for provider in incoming.get("providers", []):
@@ -93,7 +106,3 @@ async def list_available_models():
         base_url=active_provider.get("base_url", DEFAULT_LLM_BASE_URL),
         api_key=active_provider.get("api_key", "")
     )
-
-@router.get("/settings/watchdog-p95")
-async def get_watchdog_p95():
-    return await compute_watchdog_p95()

@@ -23,9 +23,11 @@ function hashId(id) {
 
 function leafDistanceFromHub(index, nodeId) {
   const h = hashId(nodeId);
-  return WORLD_CLUSTER_SPREAD.base
-    + Math.pow(index + 1, 0.65) * WORLD_CLUSTER_SPREAD.step
-    + (h % WORLD_CLUSTER_SPREAD.jitter);
+  return (
+    WORLD_CLUSTER_SPREAD.base +
+    Math.pow(index + 1, 0.65) * WORLD_CLUSTER_SPREAD.step +
+    (h % WORLD_CLUSTER_SPREAD.jitter)
+  );
 }
 
 /** 单簇子节点相对枢纽的最远半径（含节点视觉半径） */
@@ -58,11 +60,14 @@ function computePentagonHubRadius(radiiByKey) {
 function buildHubPositions(hubRadius) {
   return Object.fromEntries(
     WORLD_CATEGORY_KEYS.map((key, i) => {
-      const angle = (-Math.PI / 2) + (2 * Math.PI * i) / WORLD_CATEGORY_KEYS.length;
-      return [key, {
-        x: hubRadius * Math.cos(angle),
-        y: hubRadius * Math.sin(angle),
-      }];
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / WORLD_CATEGORY_KEYS.length;
+      return [
+        key,
+        {
+          x: hubRadius * Math.cos(angle),
+          y: hubRadius * Math.sin(angle),
+        },
+      ];
     }),
   );
 }

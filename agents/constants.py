@@ -5,16 +5,17 @@ them here prevents typos and makes refactors safer.
 """
 
 # Canonical agent / pipeline node names.
-# Used by: agents/pipeline.py, agents/schemas.py, worker_support/*, services/*,
+# Used by: agents/pipeline.py, worker_support/*, services/*,
 # routers/settings.py, frontend store.
 AGENT_PLANNER = "planner"
 AGENT_WRITER = "writer"
 AGENT_EDITOR = "editor"
 AGENT_VALIDATOR = "validator"
 AGENT_EXTRACTOR = "extractor"
+AGENT_CHARACTER_CARD = "character_card"
 
-# Ordered list of all agents (matches the default pipeline order).
-ALL_AGENTS = [AGENT_PLANNER, AGENT_WRITER, AGENT_EDITOR, AGENT_VALIDATOR, AGENT_EXTRACTOR]
+# 五个 agent 的规范顺序在 `services/pipeline_stages.CANONICAL_AGENT_ORDER` —— 它同时是
+# `PipelineStep` 顺序的派生依据，所以那里是唯一来源。这里不再放第二份同样的列表。
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +95,6 @@ def _bootstrap_default_agents() -> None:
 NOVEL_FORMAT_ZHIHU_SHORT = "zhihu_short"
 NOVEL_FORMAT_LONG_WEBNOVEL = "long_webnovel"
 
-ALL_NOVEL_FORMATS = [NOVEL_FORMAT_LONG_WEBNOVEL, NOVEL_FORMAT_ZHIHU_SHORT]
 
 # ---------------------------------------------------------------------------
 # Prompt template name constants.
@@ -124,6 +124,9 @@ PROMPT_EXTRACTOR_SUMMARIZE_CHANGES = "extractor_summarize_changes"
 PROMPT_EXTRACTOR_EXTRACT_CHANGES = "extractor_extract_changes"
 PROMPT_ISSUE_CLASSIFIER_CLASSIFY_ISSUES = "issue_classifier_classify_issues"
 PROMPT_COMMUNITY_SUMMARIZER = "community_summarizer"
+PROMPT_CHARACTER_GENERATE_CARDS = "character_generate_cards"
+PROMPT_EXTRACT_CHARACTER_CARDS = "extractor_extract_character_cards"
+CHARACTER_CARD_TEMPERATURE: float = 0.25
 
 # Per-agent max_tokens overrides for non-JSON call_llm paths.
 # (JSON paths use DEFAULT_LLM_JSON_MAX_TOKENS from below.)
@@ -174,12 +177,31 @@ EXTRACTOR_TEMPERATURE: float = 0.2     # knowledge extraction — strict
 ISSUE_CLASSIFIER_TEMPERATURE: float = 0.2   # issue classification — strict
 COMMUNITY_SUMMARIZER_TEMPERATURE: float = 0.3  # summarization — balanced
 
+CHARACTER_FACT_SOURCE_RULES = """
+【角色事实时序硬规则】
+1. 角色卡中的 current_state/state_at_previous_chapter 是当前章节唯一可直接使用的动态事实；只能使用截至当前章节已经发生的事实。
+2. card_data 中的背景、成长路线、main_arc、side_arcs 可能包含未来规划，只能作为未来方向，绝不能当作已经发生，也不能把未来章节事件提前写入正文或动态状态。
+3. 本章结束状态只能由本章正文明确发生的事件产生。没有正文证据的身份揭示、首次见面、关系升级、地点变化、能力获得、伤势恢复和物品获得，一律禁止写入。
+4. 如果角色卡的未来路线与正文或当前状态冲突，优先遵守当前章节以前已发生的正文事实；不要自行修正或提前兑现未来路线。
+5. 生成角色卡动态更新时，只输出本章新增或变化的字段，不复制整张卡，也不把未来计划写入 current_state。
+"""
+
+CHARACTER_CARD_EXTRACTION_RULES = """
+【首次建卡规则】
+1. new_character_candidates 中 card_exists=false 表示首次建卡。只为本章明确出场且具有持续剧情作用的角色输出更新；临时路人、无名群体和仅被提及的角色不要建卡。
+2. 首次建卡时，必须使用 global_character_hints、chapter_outline 和正文中已有的信息生成 card_data_updates；至少填写能够确认的 identity、personality、background、speech_style、growth_route 或 main_arc，不能返回空的 card_data_updates。未知字段留空，不得猜测。
+3. 首次建卡必须用 state_data 记录本章结束时正文明确显示的动态状态。已有角色卡只输出本章明确变化的字段。
+4. relationships 只写本章明确新增或变化的关系。growth_route、main_arc、side_arcs 只能表达未来方向，不能伪装成已经发生的事实。
+5. global_character_hints 中的角色设定可以作为稳定角色卡来源，但其中的未来情节只能写入成长路线，不能写入 current_state。
+"""
+
 # Prompt input-token warning threshold. Above this we broadcast a cost warning
 # to the frontend so the user can monitor API spend.
 PROMPT_TOKEN_WARNING_THRESHOLD: int = 35000
 
-# PromptTemplate in-memory cache TTL (seconds). DB lookups for prompt templates
-# are cached for this long before being re-fetched.
+# PromptTemplate in-memory cache TTL (seconds). 正常路径的新鲜度由
+# prompt_templates 表版本戳保证（services/config_versions.py），TTL 只在
+# 戳查询不可用（DB 抖动/迁移未跑）时兜底。
 PROMPT_CACHE_TTL_SECONDS: int = 300
 
 # Hard upper bound on the number of entries kept in the in-memory

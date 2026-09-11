@@ -1,8 +1,11 @@
+import logging
 import time
 from typing import Optional
 
 from agents.constants import PROMPT_CACHE_MAX_ENTRIES, PROMPT_CACHE_TTL_SECONDS
 
+
+logger = logging.getLogger(__name__)
 
 PromptTemplateValue = tuple[str, str]
 PromptTemplateKey = tuple[str, str]
@@ -24,6 +27,11 @@ class PromptTemplateCache:
             return value
         self._entries.pop(key, None)
         return None
+
+    def get_ignoring_ttl(self, key: PromptTemplateKey) -> Optional[PromptTemplateValue]:
+        """版本戳已确认表未变时使用：新鲜度由表戳保证，不再看单条 TTL。"""
+        cached = self._entries.get(key)
+        return cached[0] if cached else None
 
     def set(self, key: PromptTemplateKey, value: PromptTemplateValue, *, now: Optional[float] = None) -> None:
         now = time.time() if now is None else now
@@ -65,22 +73,53 @@ _prompt_template_cache = PromptTemplateCache(
     max_entries=PROMPT_CACHE_MAX_ENTRIES,
 )
 
+# prompt_templates 表的当前版本戳；None 表示本进程还没读过库。API 进程改库
+# 后，独立 worker 进程靠这条戳感知变化（见 services/config_versions.py）。
+# 戳查询失败时保持旧戳不动，缓存退回 TTL 兜底。
+_prompt_table_stamp: Optional[tuple[int, str | None]] = None
+
 
 def invalidate_prompt_cache(name: Optional[str] = None, category: Optional[str] = None) -> None:
     _prompt_template_cache.invalidate(name, category)
 
 
 async def load_prompt_template(name: str, *, category: str) -> PromptTemplateValue:
+    """按 (name, category) 从数据库加载提示词模板，带版本戳 + TTL 双层缓存。
+
+    **不做工作流覆盖解析** —— 那件事在 `agents/base.AgentBase.get_prompt_template`
+    里做一次（见 `services/prompt_scope.resolve` 的说明：套两次会在病态映射下翻回去）。
+    直接调用本函数会绕过自定义节点的提示词覆盖。
+
+    新鲜度由组合表戳保证：戳一致直接命中缓存（无视单条 TTL），戳变化全清重读。
+    戳查询不可用（DB 抖动/迁移未跑）时退回既有 300s TTL 行为 —— 可用性优先于
+    新鲜度。
+    """
+    global _prompt_table_stamp
     cache_key = (name, category)
-    cached = _prompt_template_cache.get(cache_key)
-    if cached is not None:
-        return cached
 
     from sqlalchemy import select
     from database import async_session
     from models.novel import PromptTemplate
 
     async with async_session() as session:
+        try:
+            from services.config_versions import table_version_stamp
+
+            stamp = await table_version_stamp(session, "prompt_templates")
+        except Exception:
+            logger.warning("prompt_table_stamp_unavailable fallback=ttl", exc_info=True)
+            cached = _prompt_template_cache.get(cache_key)
+            if cached is not None:
+                return cached
+        else:
+            if stamp != _prompt_table_stamp:
+                _prompt_table_stamp = stamp
+                _prompt_template_cache.invalidate()
+            else:
+                cached = _prompt_template_cache.get_ignoring_ttl(cache_key)
+                if cached is not None:
+                    return cached
+
         res = await session.execute(
             select(PromptTemplate)
             .where(PromptTemplate.name == name, PromptTemplate.category == category)

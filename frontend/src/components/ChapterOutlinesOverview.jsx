@@ -1,26 +1,36 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Loader2, BookOpen, X } from 'lucide-react';
+import { chapterApi } from '../services/novelApi';
+import { createRequestGuard } from '../utils/requestLifecycle';
 
-export default function ChapterOutlinesOverview({ project, API_BASE, onClose }) {
+export default function ChapterOutlinesOverview({ project, onClose }) {
   const [outlines, setOutlines] = useState([]);
   const [loading, setLoading] = useState(true);
+  const requestGuardRef = useRef(null);
+  if (!requestGuardRef.current) requestGuardRef.current = createRequestGuard();
 
   useEffect(() => {
-    if (!project) return;
+    requestGuardRef.current.cancel();
+    if (!project?.id) return undefined;
+    const request = requestGuardRef.current.start();
     setLoading(true);
-    fetch(`${API_BASE}/writing/${project.id}/chapter-outlines`)
-      .then(res => res.json())
-      .then(data => {
+    chapterApi
+      .outlines(project.id, { signal: request.signal })
+      .then((data) => {
+        if (!request.isCurrent()) return;
         // Sort by chapter index ascending
         const sorted = (data || []).sort((a, b) => a.chapter_index - b.chapter_index);
         setOutlines(sorted);
         setLoading(false);
       })
-      .catch(err => {
-        console.error(err);
-        setLoading(false);
+      .catch((err) => {
+        if (request.isCurrent() && err.name !== 'AbortError') {
+          console.error(err);
+          setLoading(false);
+        }
       });
-  }, [project, API_BASE]);
+    return () => requestGuardRef.current.cancel();
+  }, [project?.id]);
 
   // O-12: Lock body scroll and enable Escape key to close
   useEffect(() => {
@@ -50,12 +60,31 @@ export default function ChapterOutlinesOverview({ project, API_BASE, onClose }) 
 
         <div className="overview-modal-body">
           {loading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', gap: '12px', color: 'var(--text-secondary)' }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                height: '100%',
+                gap: '12px',
+                color: 'var(--text-secondary)',
+              }}
+            >
               <Loader2 className="animate-spin" size={32} style={{ color: 'var(--vermilion)' }} />
               <span>正在展开小说分章大纲卷轴...</span>
             </div>
           ) : outlines.length === 0 ? (
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-secondary)', fontSize: '14px' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                height: '100%',
+                color: 'var(--text-secondary)',
+                fontSize: '14px',
+              }}
+            >
               <span>书案空空如也，暂未生成任何章节大纲设定。</span>
             </div>
           ) : (
@@ -79,15 +108,13 @@ export default function ChapterOutlinesOverview({ project, API_BASE, onClose }) 
 
                 return (
                   <div key={item.chapter_index} className="overview-chapter-item">
-                    <div className="overview-chapter-node">
-                      {item.chapter_index}
-                    </div>
+                    <div className="overview-chapter-node">{item.chapter_index}</div>
                     <div className="overview-chapter-card">
                       <h3 className="overview-chapter-title">
                         第 {item.chapter_index} 章：{title}
                       </h3>
                       <p className="overview-chapter-summary">{summary}</p>
-                      
+
                       {Array.isArray(plotPts) ? (
                         plotPts.length > 0 && (
                           <ul className="overview-chapter-events">

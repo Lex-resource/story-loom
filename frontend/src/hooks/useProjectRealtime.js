@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { BACKEND_URL } from '../services/api';
-import {
-  EvaluationsStreamParser,
-  StreamingJsonFieldParser,
-  ValidatorStreamParser,
-} from '../utils/streamingJsonParser';
+import { EvaluationsStreamParser, StreamingJsonFieldParser, ValidatorStreamParser } from '../utils/streamingJsonParser';
 
 export const MAX_RECONNECT_ATTEMPTS = 5;
 
 export function shouldApplyChapterStreaming(autoFollow, messageChapterIndex, activeChapterIndex) {
   return autoFollow || !messageChapterIndex || messageChapterIndex === activeChapterIndex;
+}
+
+export function isActiveSocket(activeSocket, socket) {
+  return activeSocket === socket;
 }
 
 function buildWebSocketUrl(projectId) {
@@ -48,62 +48,81 @@ export default function useProjectRealtime({ projectId, onMessage, onOpen, onLog
     projectIdRef.current = null;
     setIsConnected(false);
     if (socket) {
+      socket.onmessage = null;
       socket.onclose = null;
       socket.onerror = null;
       socket.close();
     }
   }, []);
 
-  const connect = useCallback((nextProjectId) => {
-    if (!nextProjectId) return;
-    const existing = socketRef.current;
-    if (existing && projectIdRef.current === nextProjectId && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) return;
-    disconnect();
-    intentionalCloseRef.current = false;
-    const socket = new WebSocket(buildWebSocketUrl(nextProjectId));
-    socketRef.current = socket;
-    projectIdRef.current = nextProjectId;
+  const connect = useCallback(
+    (nextProjectId) => {
+      if (!nextProjectId) return;
+      const existing = socketRef.current;
+      if (
+        existing &&
+        projectIdRef.current === nextProjectId &&
+        (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)
+      )
+        return;
+      disconnect();
+      intentionalCloseRef.current = false;
+      const socket = new WebSocket(buildWebSocketUrl(nextProjectId));
+      socketRef.current = socket;
+      projectIdRef.current = nextProjectId;
 
-    socket.onopen = () => {
-      reconnectAttemptsRef.current = 0;
-      setIsConnected(true);
-      callbacksRef.current.onOpen?.(nextProjectId);
-    };
-    socket.onmessage = (event) => {
-      try {
-        callbacksRef.current.onMessage?.(JSON.parse(event.data));
-      } catch (error) {
-        callbacksRef.current.onError?.(error, 'parse');
-      }
-    };
-    socket.onclose = () => {
-      if (socketRef.current === socket) {
+      socket.onopen = () => {
+        if (!isActiveSocket(socketRef.current, socket)) return;
+        reconnectAttemptsRef.current = 0;
+        setIsConnected(true);
+        callbacksRef.current.onOpen?.(nextProjectId);
+      };
+      socket.onmessage = (event) => {
+        if (!isActiveSocket(socketRef.current, socket)) return;
+        try {
+          callbacksRef.current.onMessage?.(JSON.parse(event.data));
+        } catch (error) {
+          callbacksRef.current.onError?.(error, 'parse');
+        }
+      };
+      socket.onclose = () => {
+        if (!isActiveSocket(socketRef.current, socket)) return;
         socketRef.current = null;
         projectIdRef.current = null;
-      }
-      setIsConnected(false);
-      if (intentionalCloseRef.current) {
-        intentionalCloseRef.current = false;
-        return;
-      }
-      if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
-        callbacksRef.current.onLog?.('系统', `WebSocket 重连已达最大次数 (${MAX_RECONNECT_ATTEMPTS})，停止重连。请手动刷新页面。`, 'error');
-        return;
-      }
-      const attempt = reconnectAttemptsRef.current;
-      reconnectAttemptsRef.current += 1;
-      const delay = Math.min(5000 * 2 ** attempt, 30000);
-      callbacksRef.current.onLog?.('系统', `WebSocket 连接已断开，${delay / 1000}秒后尝试第 ${attempt + 1}/${MAX_RECONNECT_ATTEMPTS} 次重连...`, 'error');
-      reconnectTimerRef.current = setTimeout(() => {
-        reconnectTimerRef.current = null;
-        if (!intentionalCloseRef.current) connect(nextProjectId);
-      }, delay);
-    };
-    socket.onerror = (error) => {
-      setIsConnected(false);
-      callbacksRef.current.onError?.(error, 'socket');
-    };
-  }, [disconnect]);
+        setIsConnected(false);
+        if (intentionalCloseRef.current) {
+          intentionalCloseRef.current = false;
+          return;
+        }
+        if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+          callbacksRef.current.onLog?.(
+            '系统',
+            `WebSocket 重连已达最大次数 (${MAX_RECONNECT_ATTEMPTS})，停止重连。请手动刷新页面。`,
+            'error',
+          );
+          return;
+        }
+        const attempt = reconnectAttemptsRef.current;
+        reconnectAttemptsRef.current += 1;
+        const delay = Math.min(5000 * 2 ** attempt, 30000);
+        callbacksRef.current.onLog?.(
+          '系统',
+          `WebSocket 连接已断开，${delay / 1000}秒后尝试第 ${attempt + 1}/${MAX_RECONNECT_ATTEMPTS} 次重连...`,
+          'error',
+        );
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+          if (!intentionalCloseRef.current) connect(nextProjectId);
+        }, delay);
+      };
+      socket.onerror = (error) => {
+        if (!isActiveSocket(socketRef.current, socket)) return;
+        setIsConnected(false);
+        callbacksRef.current.onError?.(error, 'socket');
+      };
+    },
+    [disconnect],
+  );
 
   const resetEditorParsers = useCallback(() => {
     editorParserRef.current = new StreamingJsonFieldParser('edited_content');
@@ -120,20 +139,26 @@ export default function useProjectRealtime({ projectId, onMessage, onOpen, onLog
     validatorParserRef.current = null;
   }, []);
 
-  const appendEditorChunk = useCallback((text) => {
-    if (!editorParserRef.current || !evaluationsParserRef.current) resetEditorParsers();
-    const previousLength = editorParserRef.current.valueBuffer.length;
-    editorParserRef.current.append(text);
-    return {
-      content: editorParserRef.current.valueBuffer.slice(previousLength),
-      evaluations: evaluationsParserRef.current.append(text),
-    };
-  }, [resetEditorParsers]);
+  const appendEditorChunk = useCallback(
+    (text) => {
+      if (!editorParserRef.current || !evaluationsParserRef.current) resetEditorParsers();
+      const previousLength = editorParserRef.current.valueBuffer.length;
+      editorParserRef.current.append(text);
+      return {
+        content: editorParserRef.current.valueBuffer.slice(previousLength),
+        evaluations: evaluationsParserRef.current.append(text),
+      };
+    },
+    [resetEditorParsers],
+  );
 
-  const appendValidatorChunk = useCallback((text) => {
-    if (!validatorParserRef.current) resetValidatorParser();
-    return validatorParserRef.current.append(text);
-  }, [resetValidatorParser]);
+  const appendValidatorChunk = useCallback(
+    (text) => {
+      if (!validatorParserRef.current) resetValidatorParser();
+      return validatorParserRef.current.append(text);
+    },
+    [resetValidatorParser],
+  );
 
   useEffect(() => {
     resetParsers();

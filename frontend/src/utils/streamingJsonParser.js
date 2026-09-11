@@ -117,18 +117,14 @@ export class EvaluationsStreamParser {
     let completeReasons = 0;
     for (const { key } of EVALUATION_DIMS) {
       // F-17: Use [\s\S]*? (non-greedy, any char) instead of [^}]* to handle nested objects
-      const scoreMatch = this.buffer.match(
-        new RegExp(`"${key}"\\s*:\\s*\\{[\\s\\S]*?"score"\\s*:\\s*(\\d+)`),
-      );
+      const scoreMatch = this.buffer.match(new RegExp(`"${key}"\\s*:\\s*\\{[\\s\\S]*?"score"\\s*:\\s*(\\d+)`));
       const reasonMatch = this.buffer.match(
         new RegExp(`"${key}"\\s*:\\s*\\{[\\s\\S]*?"reason"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`),
       );
       if (scoreMatch) {
         result[key] = {
           score: parseInt(scoreMatch[1], 10),
-          reason: reasonMatch
-            ? reasonMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"')
-            : '',
+          reason: reasonMatch ? reasonMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : '',
         };
       }
       if (scoreMatch && reasonMatch) completeReasons++;
@@ -155,7 +151,8 @@ export class ValidatorStreamParser {
   append(chunk) {
     this.buffer += chunk;
     const issues = [];
-    const issueRegex = /\{\s*"category"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"description"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"severity"\s*:\s*"([^"]*)"/g;
+    const issueRegex =
+      /\{\s*"category"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"description"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"severity"\s*:\s*"([^"]*)"/g;
     let m;
     while ((m = issueRegex.exec(this.buffer)) !== null) {
       issues.push({
@@ -174,15 +171,13 @@ export class ValidatorStreamParser {
 }
 
 const STORY_REVIEW_CATEGORIES = new Set(['style', 'pacing', 'character', 'character_portrayal', 'writing_quality']);
-const LONG_WEBNOVEL_FORMAT = 'long_webnovel';
 
 /** 将 validator issues 转为 validationResult 格式 */
-export function issuesToValidationResult(issues, passed = null, novelFormat = null) {
+export function issuesToValidationResult(issues, passed = null) {
   const errors = [];
   const warnings = [];
   const infos = [];
   const storyIssues = [];
-  const isLongWebnovel = novelFormat === LONG_WEBNOVEL_FORMAT;
 
   issues.forEach((issue) => {
     const text = `[${issue.category}] ${issue.description}`;
@@ -190,7 +185,10 @@ export function issuesToValidationResult(issues, passed = null, novelFormat = nu
     const category = String(issue.category || '').toLowerCase();
     const issuePayload = { ...issue, message: text };
 
-    if (isLongWebnovel && STORY_REVIEW_CATEGORIES.has(category)) storyIssues.push(issuePayload);
+    // 观察项分流与工作流无关（后端同款：worker_support/validation.py）。这里曾经额外要求
+    // novelFormat === 'long_webnovel'，于是短篇和一切自定义工作流的节奏/文风类问题在界面上
+    // 退化成 errors/warnings —— 而短篇表面明说这类问题一律 warning、不得触发重写。
+    if (STORY_REVIEW_CATEGORIES.has(category)) storyIssues.push(issuePayload);
     else if (sev === 'block') errors.push(text);
     else if (sev === 'warning') warnings.push(text);
     else infos.push(text);

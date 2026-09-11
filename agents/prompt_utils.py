@@ -3,6 +3,11 @@ import string
 from typing import Any
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def strip_emojis(text: str) -> str:
     if not text:
         return text
@@ -43,20 +48,41 @@ UNTRUSTED_CONTENT_SYSTEM_REMINDER = (
 
 
 class _SafeFormatter(string.Formatter):
-    """Formatter that returns empty string for missing keys instead of raising KeyError."""
+    """Format known placeholders without consuming JSON object braces.
+
+    Prompt templates contain both Python-style placeholders and literal JSON
+    examples. ``string.Formatter`` interprets a JSON object such as
+    ``{"updates": []}`` as a field named ``"updates"``. Unknown fields that
+    look like JSON keys must therefore be emitted verbatim, while ordinary
+    missing placeholders retain the historical empty-string behaviour.
+    """
+
+    @staticmethod
+    def _is_placeholder_name(field_name: str) -> bool:
+        base = field_name.split(".", 1)[0].split("[", 1)[0].strip()
+        return bool(base) and base.isidentifier()
 
     def get_field(self, field_name, args, kwargs):
         try:
             return super().get_field(field_name, args, kwargs)
         except (AttributeError, IndexError, KeyError):
+            if not self._is_placeholder_name(field_name):
+                return _LiteralField(field_name), field_name
             return "", field_name
 
     def get_value(self, key, args, kwargs):
         if isinstance(key, str):
-            return kwargs.get(key, "")
+            if key in kwargs:
+                return kwargs[key]
+            if not self._is_placeholder_name(key):
+                return _LiteralField(key)
+            return ""
         return super().get_value(key, args, kwargs)
 
     def format_field(self, value, format_spec):
+        if isinstance(value, _LiteralField):
+            suffix = f":{format_spec}" if format_spec else ""
+            return "{" + value.field_name + suffix + "}"
         try:
             return super().format_field(value, format_spec)
         except ValueError:
@@ -68,6 +94,13 @@ class _SafeFormatter(string.Formatter):
 _safe_formatter = _SafeFormatter()
 
 
+class _LiteralField:
+    """Marker used to restore a non-placeholder brace expression."""
+
+    def __init__(self, field_name: str):
+        self.field_name = field_name
+
+
 def collect_missing_placeholders(template: str, kwargs: dict) -> set[str]:
     """Return named placeholders referenced by *template* but absent from *kwargs*."""
     missing: set[str] = set()
@@ -76,7 +109,7 @@ def collect_missing_placeholders(template: str, kwargs: dict) -> set[str]:
         if not field_name:
             continue
         base = field_name.split(".", 1)[0].split("[", 1)[0]
-        if not base or base.isdigit():
+        if not base or base.isdigit() or not base.strip().isidentifier():
             continue
         if base not in provided:
             missing.add(base)
@@ -88,7 +121,7 @@ def safe_format(template: str, **kwargs) -> str:
     missing = collect_missing_placeholders(template, kwargs)
     if missing:
         preview = template.replace("\n", " ")[:120]
-        print(
+        logger.warning(
             f"[AgentBase DEBUG] safe_format: template references "
             f"placeholder(s) not supplied: {sorted(missing)} "
             f"(replaced with empty string). template preview: {preview!r}"

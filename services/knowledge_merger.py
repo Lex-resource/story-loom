@@ -1,100 +1,71 @@
 import logging
 import uuid
+from typing import Any
+from config import settings
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.novel import Novel, Chapter, LivingDocVersion, VectorOutbox
-from agents.constants import NOVEL_FORMAT_ZHIHU_SHORT, AGENT_PLANNER, AGENT_EXTRACTOR
+from models.novel import Novel, Chapter
+from agents.constants import (
+    AGENT_EXTRACTOR,
+    AGENT_CHARACTER_CARD,
+)
 from agents.pipeline import ExtractorNode
 from agents.pipeline_context import PipelineContext
-from services import living_docs
-from services.document_constants import ALL_DOC_TYPES
-from services.novel_constants import CHAPTER_VERSION_DIR_TEMPLATE
-from services.stream_constants import STREAM_SOURCE_EXTRACTOR
-from services.knowledge_markdown import knowledge_to_markdown
-from services.knowledge_frozen_facts import find_frozen_fact_violations
-from services.knowledge_patch_models import KnowledgePatchSet
-from services.knowledge_patch_service import apply_knowledge_patches
+from services.workflow_surface import is_short_form_workflow
+from services.stream_constants import STREAM_EVENT_CHARACTER_CARDS_UPDATED, STREAM_SOURCE_EXTRACTOR
+from services.knowledge_patch_models import KnowledgePatchSet, KnowledgePatchSummary
+from services.character_card_service import apply_character_card_updates
+from services.character_card_bootstrap import (
+    generate_initial_character_updates,
+    merge_initial_character_updates,
+)
+from services.character_vector_service import enqueue_character_manifest_vectors
+from services.character_constants import CHARACTER_CHAPTER_SOURCE_REF_TEMPLATE
+from services.character_types import CharacterCardUpdate
 from services.pipeline_transitions import publish_chapter_state
-from services.pipeline_types import ChapterStatus, VectorOutboxStatus
+from services.pipeline_types import ChapterStatus
 from services.project_stats import chapter_chars_from_row, sum_project_chars
 from services.stream_manager import stream_manager
-from services.knowledge_filtering import (
-    get_filtered_world_state,
-    get_filtered_foreshadowing,
-    get_filtered_character_state,
+from services.novel_memory_evidence import capture_chapter_extractor_evidence
+from services.novel_memory_atoms import (
+    atom_conflict_issue,
+    promote_reviewed_atom_candidates,
+    reject_atom_candidates,
+    reject_conflicting_atom_candidates,
+    record_patch_atoms,
+    review_atom_candidates,
+    sync_world_rule_doctrines,
 )
+from services.novel_memory_conflicts import record_hard_conflicts
+from services.novel_memory_conflicts import (
+    is_hard_extractor_issue,
+    resolve_conflicts_automatically,
+)
+from services.novel_memory_scenes import aggregate_scene_block
+from services.narrative_index import sync_narrative_index
+from services.chapter_continuity import build_chapter_handoff
+from services.memory_manager import MemoryManager
 
 logger = logging.getLogger(__name__)
-
-SOFT_EXTRACTOR_RISK_TERMS = (
-    "可能",
-    "需后续",
-    "后续验证",
-    "待验证",
-    "需确认",
-    "需要确认",
-    "动机不明",
-    "可靠性低",
-    "误读",
-    "悬念",
-    "伏笔",
-    "不确定",
-    "信息不足",
-    "可疑",
-)
-
-HARD_EXTRACTOR_RISK_TERMS = (
-    "明确冲突",
-    "直接冲突",
-    "硬冲突",
-    "直接矛盾",
-    "违反既有",
-    "推翻既有",
-    "覆盖既有",
-    "删除既有",
-    "生死状态冲突",
-    "时间线硬冲突",
-    "权限体系硬冲突",
-)
-
-
-def is_hard_extractor_issue(issue: dict) -> bool:
-    """Return True only for extractor issues that should block publishing.
-
-    Long-form fiction often uses ambiguity on purpose. Notes such as
-    "动机不明", "可能是陷阱", or "需后续验证" are useful continuity hints, but
-    they should not force a human checkpoint every chapter.
-    """
-    if not isinstance(issue, dict):
-        return False
-    if str(issue.get("severity", "")).lower() != "high":
-        return False
-    if str(issue.get("category", "")) == "frozen_fact":
-        return True
-
-    text = " ".join(
-        str(issue.get(key, "") or "")
-        for key in ("category", "description", "message", "detail")
-    )
-    if any(term in text for term in SOFT_EXTRACTOR_RISK_TERMS):
-        return False
-    return any(term in text for term in HARD_EXTRACTOR_RISK_TERMS)
-
 
 def append_extractor_review_flag(
     chapter: Chapter,
     high_risk_issues: list[dict],
     patch_set: KnowledgePatchSet | None = None,
+    character_updates: list[dict] | None = None,
+    conflict_records: list[Any] | None = None,
+    automated: bool = False,
 ) -> None:
     flags = chapter.review_flags or []
     if not isinstance(flags, list):
         flags = []
 
+    flag_type = "extractor_auto_review" if automated else "extractor_high_risk"
     existing_descriptions = {
         issue.get("description")
         for flag in flags
-        if isinstance(flag, dict) and flag.get("type") == "extractor_high_risk"
+        if isinstance(flag, dict) and flag.get("type") == flag_type
         for issue in (flag.get("issues") or [])
         if isinstance(issue, dict)
     }
@@ -106,78 +77,235 @@ def append_extractor_review_flag(
         return
 
     flag_entry = {
-        "type": "extractor_high_risk",
+        "type": flag_type,
         "severity": "warning",
-        "message": "设定提取器发现高风险知识变更，需人工复核后发布。",
+        "message": (
+            "系统已自动复核设定变更；冲突候选未覆盖既有事实。"
+            if automated
+            else "设定提取器发现高风险知识变更，需人工复核后发布。"
+        ),
         "issues": new_issues,
     }
+    if automated:
+        flag_entry["decision"] = "reject_conflicting_candidates"
+        flags = [
+            flag for flag in flags
+            if not (isinstance(flag, dict) and flag.get("type") == "extractor_high_risk")
+        ]
     if patch_set is not None:
         flag_entry["patch_set"] = patch_set.model_dump()
+    if character_updates:
+        flag_entry["character_updates"] = character_updates
+    if conflict_records:
+        flag_entry["conflict_ids"] = [str(item.id) for item in conflict_records]
     chapter.review_flags = list(flags) + [flag_entry]
 
 
-async def apply_extractor_updates(db: AsyncSession, novel: Novel, chapter: Chapter, extract_result: dict):
+async def apply_extractor_updates(
+    db: AsyncSession,
+    novel: Novel,
+    chapter: Chapter,
+    extract_result: dict,
+    *,
+    ensure_active=None,
+):
     """Apply extractor output to living docs, vector outbox, and chapter state.
 
-    .. warning::
-        This function calls ``await db.commit()`` on the caller's session.
-        Any uncommitted changes the caller has accumulated will be committed
-        together with the extractor updates. Callers that need to keep their
-        own changes pending should commit (or rollback) before calling this
-        function, or use a nested transaction (savepoint).
-
-    After the commit, two best-effort background tasks run in independent
-    try/except blocks so their failure does not roll back the extractor
-    updates: (1) issue summary refresh, (2) periodic outline optimization.
+    All canonical PostgreSQL projections for one chapter are committed once.
+    The vector worker consumes outbox rows only after that commit, so a failed
+    scene or narrative projection rolls back the complete publication.
     """
     chapter_index = chapter.chapter_index
-    await stream_manager.broadcast(str(novel.id), "log", {"source": STREAM_SOURCE_EXTRACTOR, "message": "正在写入并更新最新的人物经历与状态卡..."})
     patch_set = KnowledgePatchSet.model_validate(extract_result)
-    frozen_fact_issues = await find_frozen_fact_violations(str(novel.id), patch_set, db)
+    character_updates = _character_updates_from_extractor(extract_result)
+    evidence = None
+    if settings.ENABLE_NOVEL_MEMORY_EVIDENCE:
+        evidence = await capture_chapter_extractor_evidence(
+            db,
+            project_id=novel.id,
+            chapter_index=chapter_index,
+            chapter_content=chapter.content or "",
+            extractor_output=extract_result,
+        )
+    await stream_manager.broadcast(str(novel.id), "log", {"source": STREAM_SOURCE_EXTRACTOR, "message": "正在写入并更新最新的人物经历与状态卡..."})
+    memory_atoms = []
+    if settings.ENABLE_NOVEL_MEMORY_ATOMS:
+        memory_atoms = await record_patch_atoms(
+            db,
+            project_id=novel.id,
+            chapter_index=chapter_index,
+            patch_set=patch_set,
+            evidence_id=evidence.id if evidence is not None else None,
+        )
+    atom_reviews = await review_atom_candidates(db, memory_atoms)
+    atom_conflict_issues = [
+        issue
+        for review in atom_reviews
+        if (issue := atom_conflict_issue(review)) is not None
+    ]
     high_risk_issues = [
         issue for issue in patch_set.raw_issues
         if is_hard_extractor_issue(issue)
     ]
-    high_risk_issues = frozen_fact_issues + high_risk_issues
-    if high_risk_issues:
+    hard_issues = high_risk_issues + atom_conflict_issues
+    conflict_records = await record_hard_conflicts(
+        db,
+        project_id=novel.id,
+        chapter_index=chapter_index,
+        issues=hard_issues,
+    )
+    if hard_issues and settings.ENABLE_AUTO_EXTRACTOR_REVIEW:
+        if high_risk_issues:
+            # A raw high-severity extractor issue has no reliable field-level
+            # mapping, so keep every generated candidate out of canonical recall.
+            reject_atom_candidates(memory_atoms)
+        else:
+            reject_conflicting_atom_candidates(atom_reviews)
+        resolve_conflicts_automatically(conflict_records)
+        append_extractor_review_flag(
+            chapter,
+            hard_issues,
+            patch_set,
+            character_updates=[item.model_dump(mode="json") for item in character_updates],
+            conflict_records=conflict_records,
+            automated=True,
+        )
+    elif hard_issues:
         chapter.status = ChapterStatus.PENDING_REVIEW
-        append_extractor_review_flag(chapter, high_risk_issues, patch_set)
+        append_extractor_review_flag(
+            chapter,
+            hard_issues,
+            patch_set,
+            character_updates=[item.model_dump(mode="json") for item in character_updates],
+            conflict_records=conflict_records,
+        )
         chapter.error = "设定提取器发现高风险知识变更，需人工复核后发布。"
+        if ensure_active is not None:
+            await ensure_active()
         await db.commit()
         return
 
-    patch_summary = await apply_knowledge_patches(str(novel.id), patch_set, db, chapter_index=chapter_index)
-    vector_items = patch_summary.vector_items
-    character_state_txt = knowledge_to_markdown(
-        "character_state",
-        await living_docs.read_knowledge(str(novel.id), "character_state", db),
+    character_update_summary = await apply_character_card_updates(
+        db,
+        novel.id,
+        chapter_index=chapter_index,
+        updates=character_updates,
+        source_ref=CHARACTER_CHAPTER_SOURCE_REF_TEMPLATE.format(chapter_index=chapter_index),
     )
-    if vector_items:
-        outbox = VectorOutbox(
-            project_id=novel.id, chapter_index=chapter_index,
-            payload={"items": vector_items}, status=VectorOutboxStatus.PENDING
+    changed_character_names = [
+        card.name for card in character_update_summary["changed_cards"]
+    ]
+    await enqueue_character_manifest_vectors(
+        db,
+        character_update_summary["changed_cards"],
+        chapter_index=chapter_index,
+    )
+    patch_summary = KnowledgePatchSummary(
+        changed_categorys=list(dict.fromkeys(patch.category for patch in patch_set.patches)),
+        changed_items=[f"{patch.category}:{patch.name}" for patch in patch_set.patches],
+        vector_items=[],
+    )
+    patch_summary.changed_items.extend(
+        f"character_card:{card.name}" for card in character_update_summary["changed_cards"]
+    )
+    if character_update_summary["changed_cards"]:
+        patch_summary.changed_categorys.append("character")
+    # Canonical services succeeded, so only the reviewed candidates can be
+    # promoted. Conflicting candidates returned above as review items.
+    accepted_memory_atoms = promote_reviewed_atom_candidates(atom_reviews)
+    if settings.ENABLE_NOVEL_MEMORY_RECALL:
+        await sync_world_rule_doctrines(
+            db,
+            project_id=novel.id,
+            atoms=accepted_memory_atoms,
         )
-        db.add(outbox)
-
-    for doc_type in ALL_DOC_TYPES:
-        checksum = await living_docs.snapshot_doc(str(novel.id), chapter_index, doc_type, db)
-        if checksum:
-            version = LivingDocVersion(
-                project_id=novel.id, chapter_index=chapter_index,
-                doc_type=doc_type,
-                path=f"versions/{CHAPTER_VERSION_DIR_TEMPLATE.format(chapter_index)}/{doc_type}.md",
-                checksum=checksum,
-            )
-            db.add(version)
 
     publish_chapter_state(chapter)
+    chapter.error = None
     novel.current_chapter = max(novel.current_chapter or 0, chapter_index)
     if (novel.total_chapters or 0) < chapter_index:
         novel.total_chapters = chapter_index
     word_count = chapter_chars_from_row(chapter)
     chapter.word_count = word_count
     novel.total_chars = await sum_project_chars(db, novel.id)
-    await db.commit()
+
+    if settings.ENABLE_NOVEL_MEMORY_SCENE_BLOCKS:
+        outline = chapter.outline if isinstance(chapter.outline, dict) else {}
+        summary = str(outline.get("summary") or (chapter.content or "")[:800]).strip()
+        recent_changes = [
+            f"{patch.category}:{patch.name}:{patch.operation}"
+            for patch in patch_set.patches
+        ]
+        open_questions = [
+            str(issue.get("description") or issue.get("message"))
+            for issue in patch_set.raw_issues
+            if isinstance(issue, dict) and (issue.get("description") or issue.get("message"))
+        ]
+        await aggregate_scene_block(
+            db,
+            project_id=novel.id,
+            scope_type="plotline",
+            scope_key=str(outline.get("plotline") or "mainline"),
+            summary=summary,
+            current_state={
+                "last_chapter": chapter_index,
+                "chapter_title": chapter.title or "",
+                "status": chapter.status,
+            },
+            open_questions=open_questions,
+            recent_changes=recent_changes,
+            source_ref=f"chapter:{chapter_index}:scene",
+            source_chapter=chapter_index,
+            valid_from_chapter=chapter_index,
+        )
+
+    if settings.ENABLE_NOVEL_NARRATIVE_INDEX:
+        outline = chapter.outline if isinstance(chapter.outline, dict) else {}
+        handoff = await build_chapter_handoff(
+            db,
+            novel.id,
+            chapter_index + 1,
+            previous_ending=(chapter.content or "")[-1800:],
+        )
+        await sync_narrative_index(
+            db,
+            project_id=novel.id,
+            chapter_index=chapter_index,
+            outline=outline,
+            handoff=handoff.to_dict(),
+            extractor_output=extract_result,
+        )
+
+    try:
+        if ensure_active is not None:
+            await ensure_active()
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception(
+            "chapter_memory_publication_failed project_id=%s chapter_index=%s",
+            novel.id,
+            chapter_index,
+        )
+        raise
+
+    from services.experiment_publication import record_published_chapter_for_project
+    await record_published_chapter_for_project(
+        db,
+        novel.id,
+        chapter_index,
+        publication_source="post_processing",
+    )
+
+    if changed_character_names:
+        await stream_manager.broadcast(
+            str(novel.id),
+            STREAM_EVENT_CHARACTER_CARDS_UPDATED,
+            {
+                "chapter_index": chapter_index,
+                "character_names": changed_character_names,
+            },
+        )
 
     try:
         from services.issues import update_project_issue_summaries
@@ -185,7 +313,7 @@ async def apply_extractor_updates(db: AsyncSession, novel: Novel, chapter: Chapt
     except Exception:
         logger.exception("issue_summary_refresh_failed project_id=%s chapter_index=%s", novel.id, chapter_index)
 
-    if novel.novel_format == NOVEL_FORMAT_ZHIHU_SHORT:
+    if is_short_form_workflow(novel.novel_format):
         try:
             from services.short_story_review import review_completed_short_story
             await review_completed_short_story(db, novel, chapter_index)
@@ -200,45 +328,13 @@ async def apply_extractor_updates(db: AsyncSession, novel: Novel, chapter: Chapt
         except Exception:
             logger.exception("volume_review_failed project_id=%s chapter_index=%s", novel.id, chapter_index)
 
-    if novel.novel_format != NOVEL_FORMAT_ZHIHU_SHORT and novel.optimize_interval and chapter_index % novel.optimize_interval == 0:
-        try:
-            await stream_manager.broadcast(
-                str(novel.id),
-                "status",
-                {"step": AGENT_PLANNER, "chapter": chapter_index, "message": f"达到优化间隔（每 {novel.optimize_interval} 章），策划智能体正在自动优化整书大纲..."}
-            )
-            world_state = await get_filtered_world_state(db, novel.id, chapter.content or "")
-            foreshadowing = await get_filtered_foreshadowing(db, novel.id, chapter.content or "")
-            plot_threads = knowledge_to_markdown(
-                "plot_threads",
-                await living_docs.read_knowledge(str(novel.id), "plot_threads", db),
-            )
-
-            from services.outline_service import optimize_skeleton
-            await optimize_skeleton(
-                db,
-                novel,
-                world_state=world_state,
-                character_state=character_state_txt,
-                foreshadowing=foreshadowing,
-                plot_threads=plot_threads,
-                chapter_index=chapter_index,
-            )
-            await stream_manager.broadcast(
-                str(novel.id),
-                "status",
-                {"step": AGENT_PLANNER, "chapter": chapter_index, "message": "整书大纲自动优化完成！"}
-            )
-        except Exception:
-            logger.exception("outline_optimization_failed project_id=%s chapter_index=%s", novel.id, chapter_index)
-
-
 async def run_post_processing(
     db: AsyncSession,
     novel_id: uuid.UUID,
     chapter_index: int,
     *,
     run_extractor: bool = True,
+    ensure_active=None,
 ):
     result_novel = await db.execute(select(Novel).where(Novel.id == novel_id))
     novel = result_novel.scalar_one_or_none()
@@ -256,8 +352,17 @@ async def run_post_processing(
             novel.total_chapters = chapter_index
         chapter.word_count = chapter_chars_from_row(chapter)
         novel.total_chars = await sum_project_chars(db, novel.id)
+        if ensure_active is not None:
+            await ensure_active()
         await db.commit()
-        if novel.novel_format == NOVEL_FORMAT_ZHIHU_SHORT:
+        from services.experiment_publication import record_published_chapter_for_project
+        await record_published_chapter_for_project(
+            db,
+            novel.id,
+            chapter_index,
+            publication_source="post_processing_without_extractor",
+        )
+        if is_short_form_workflow(novel.novel_format):
             try:
                 from services.short_story_review import review_completed_short_story
                 await review_completed_short_story(db, novel, chapter_index)
@@ -265,44 +370,51 @@ async def run_post_processing(
                 logger.exception("short_story_review_failed project_id=%s chapter_index=%s", novel.id, chapter_index)
         return
 
-    await stream_manager.broadcast(str(novel.id), "log", {"source": STREAM_SOURCE_EXTRACTOR, "message": "设定提取器启动：开始读取章节最新的伏笔、主线和世界设定卡..."})
-
-    # Filter world_state and foreshadowing
-    world_state = await get_filtered_world_state(db, novel.id, chapter.content or "")
-    foreshadowing = await get_filtered_foreshadowing(db, novel.id, chapter.content or "")
-
-    # Filter character state to only active characters in chapter content
-    character_state_txt_raw = knowledge_to_markdown(
-        "character_state",
-        await living_docs.read_knowledge(str(novel.id), "character_state", db),
-    )
-    from services.outline_service import resolve_protagonist_name
-    protagonist_name = resolve_protagonist_name(novel)
-    character_state = get_filtered_character_state(
-        character_state_txt_raw, chapter.content or "", protagonist_name
-    )
-
-    plot_threads = knowledge_to_markdown(
-        "plot_threads",
-        await living_docs.read_knowledge(str(novel.id), "plot_threads", db),
-    )
+    await stream_manager.broadcast(str(novel.id), "log", {"source": STREAM_SOURCE_EXTRACTOR, "message": "分层记忆提取器启动：正在从章节正文提取人物状态、世界规则、伏笔和剧情线变化..."})
 
     await stream_manager.broadcast(str(novel.id), "log", {"source": STREAM_SOURCE_EXTRACTOR, "message": "设定提取分析中：正在通过大语言模型同步人物状态、伏笔回收及世界规则变动..."})
 
-    extractor_context = PipelineContext(
-        project_id=str(novel.id),
-        chapter_index=chapter.chapter_index,
-        world_state=world_state,
-        character_state=character_state,
-        foreshadowing=foreshadowing,
-        plot_threads=plot_threads,
-        title=chapter.title or "",
-        chapter_content=chapter.content or "",
-        previous_ending="",
-        novel_format=novel.novel_format or "",
-        genre="",
-        style="",
+    from services.character_context import build_extractor_character_context
+    outline_data = chapter.outline if isinstance(chapter.outline, dict) else {}
+    character_card_context = await build_extractor_character_context(
+        db,
+        novel.id,
+        chapter.chapter_index,
+        outline_data.get("characters_involved", []),
+        outline_data,
+        novel.outline if isinstance(novel.outline, dict) else None,
     )
+
+    initial_character_updates, character_card_agent = await _generate_initial_cards(
+        novel,
+        chapter,
+        character_card_context,
+    )
+    if character_card_agent is not None:
+        await character_card_agent.record_usage(
+            db,
+            novel.id,
+            chapter.chapter_index,
+            AGENT_CHARACTER_CARD,
+        )
+
+    extractor_memory = await MemoryManager.get_context(
+        db,
+        novel.id,
+        chapter.chapter_index,
+        f"{chapter.title or ''} {chapter.content[:1000] if chapter.content else ''}",
+        outline_data,
+        agent_type="extractor",
+    )
+    extractor_context = PipelineContext.from_memory(
+        str(novel.id),
+        chapter.chapter_index,
+        extractor_memory,
+    )
+    extractor_context.title = chapter.title or ""
+    extractor_context.chapter_content = chapter.content or ""
+    extractor_context.chapter_outline = outline_data
+    extractor_context.character_card_context = character_card_context
 
     extractor = ExtractorNode()
     extractor.agent.project_id = novel.id
@@ -312,4 +424,82 @@ async def run_post_processing(
     extract_result = extractor_output.payload
     await extractor.agent.record_usage(db, novel.id, chapter.chapter_index, AGENT_EXTRACTOR)
 
-    await apply_extractor_updates(db, novel, chapter, extract_result)
+    if initial_character_updates:
+        extracted_updates = _character_updates_from_extractor(extract_result)
+        extract_result["character_updates"] = [
+            update.model_dump(mode="json")
+            for update in merge_initial_character_updates(
+                initial_character_updates,
+                extracted_updates,
+            )
+        ]
+
+    # Capture the exact input/output pair before canonical knowledge merge.
+    if ensure_active is None:
+        await apply_extractor_updates(db, novel, chapter, extract_result)
+    else:
+        await apply_extractor_updates(
+            db,
+            novel,
+            chapter,
+            extract_result,
+            ensure_active=ensure_active,
+        )
+
+
+async def _generate_initial_cards(
+    novel: Novel,
+    chapter: Chapter,
+    character_card_context: str,
+):
+    try:
+        return await generate_initial_character_updates(
+            novel,
+            chapter,
+            character_card_context,
+        )
+    except Exception as exc:
+        logger.warning(
+            "initial_character_card_generation_failed project_id=%s chapter_index=%s error=%s",
+            novel.id,
+            chapter.chapter_index,
+            exc,
+        )
+        return [], None
+
+
+def _character_updates_from_extractor(extract_result: dict) -> list[CharacterCardUpdate]:
+    """Read the new structured contract and adapt old character patches."""
+    structured = extract_result.get("character_updates") if isinstance(extract_result, dict) else None
+    if isinstance(structured, list) and structured:
+        updates = [CharacterCardUpdate.model_validate(item) for item in structured]
+        # The extractor is never trusted to grant itself first-card authority.
+        return [update.model_copy(update={"card_data_authority": "extractor"}) for update in updates]
+
+    legacy_updates: list[CharacterCardUpdate] = []
+    patch_set = KnowledgePatchSet.model_validate(extract_result or {})
+    for patch in patch_set.patches:
+        if patch.category != "character":
+            continue
+        data = patch.data or {}
+        attributes = data.get("attributes") if isinstance(data.get("attributes"), dict) else {}
+        relationships = data.get("relationships")
+        if relationships is None:
+            relationships = attributes.get("relationships", [])
+        state_data = {
+            key: value
+            for key, value in {**attributes, **data}.items()
+            if key not in {"relationships", "attributes", "body", "name", "category"}
+        }
+        body = data.get("body")
+        if body:
+            state_data["latest_observation"] = body
+        legacy_updates.append(
+            CharacterCardUpdate(
+                character_name=patch.name,
+                state_data=state_data,
+                relationships=relationships if isinstance(relationships, list) else [],
+                changed_fields=[f"state_data.{key}" for key in state_data],
+            )
+        )
+    return legacy_updates

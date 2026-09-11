@@ -10,7 +10,6 @@ from worker_support.chapter_repository import get_succeeding_chapter_beginning
 from worker_support.context import MemoryManager
 from worker_support.generation_context import (
     append_succeeding_beginning_warning,
-    append_user_intervention,
     load_issue_summaries,
 )
 
@@ -31,8 +30,7 @@ async def prepare_planner_inputs(
     custom_prompt: str | None,
 ) -> PlannerPreparation:
     planner_query = f"第{chapter_index}章"
-    memory = await MemoryManager.get_context(db, novel.id, chapter_index, planner_query)
-    prompt_with_intervention = append_user_intervention(custom_prompt, memory["intervention"])
+    memory = await MemoryManager.get_context(db, novel.id, chapter_index, planner_query, agent_type="planner")
     succeeding_beginning = await get_succeeding_chapter_beginning(
         db,
         novel.id,
@@ -47,7 +45,7 @@ async def prepare_planner_inputs(
     issue_summaries = await load_issue_summaries(db, novel.id)
     return PlannerPreparation(
         memory=memory,
-        custom_prompt=prompt_with_intervention,
+        custom_prompt=custom_prompt,
         succeeding_beginning=succeeding_beginning,
         previous_ending=previous_ending,
         issue_summaries=issue_summaries,

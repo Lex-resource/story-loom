@@ -4,7 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agents.constants import AGENT_VALIDATOR
 from agents.pipeline_context import PipelineContext
 from services.editor_policy import min_score_from_evaluations, resolve_editor_decision
-from agents.constants import NOVEL_FORMAT_LONG_WEBNOVEL
 from services.validation_constants import (
     VALIDATION_MODE_QUICK_POST_EDIT,
     VALIDATION_PHASE_QUICK,
@@ -12,6 +11,7 @@ from services.validation_constants import (
     ISSUE_SEVERITY_BLOCK,
     ISSUE_SEVERITY_WARNING,
     VALIDATOR_DEFAULT_CATEGORY,
+    is_fact_conflict_issue,
 )
 from services.validator import validate_chapter
 
@@ -113,12 +113,12 @@ async def run_comprehensive_validation(
     infos = []
     story_issues = []
     hard_issues = []
-    is_long_webnovel = mem_context.get("novel_format") == NOVEL_FORMAT_LONG_WEBNOVEL
 
     for issue in llm_res.get("issues", []):
         desc = f"[{issue.get('category', VALIDATOR_DEFAULT_CATEGORY)}] {issue.get('description', '')} (建议：{issue.get('fix_suggestion', '')})"
         sev = issue.get("severity", ISSUE_SEVERITY_BLOCK).lower()
         category = str(issue.get("category", VALIDATOR_DEFAULT_CATEGORY)).lower()
+        fact_conflict = is_fact_conflict_issue(issue)
         issue_payload = {**issue, "message": desc}
         # A severe writing_quality finding must be able to force a rewrite even
         # when plot/setting are fine — otherwise "设定全对但平庸无聊" always passes.
@@ -127,7 +127,16 @@ async def run_comprehensive_validation(
         quality_gate_override = (
             category == "writing_quality" and sev in BLOCKING_SEVERITIES
         )
-        if is_long_webnovel and category in STORY_REVIEW_CATEGORIES and not quality_gate_override:
+        # style/pacing/character 一律只作观察项（story_issues），不进 errors 阻断；只有
+        # writing_quality 到阻断级才掉下去。这条分流原先加了 `novel_format == 长篇` 的前提，
+        # 于是短篇和一切自定义工作流都拿不到 —— 短篇表面明明宣布「节奏、密度、文风、爽点
+        # 一律 warning，不得单独触发重写」（services/short_form_surfaces.py:59-66），实际却比
+        # 长篇更严：pacing 判 block 会直接进 errors。分流本身与工作流无关，去掉那个前提。
+        if fact_conflict:
+            issue_payload["severity"] = ISSUE_SEVERITY_BLOCK
+            errors.append(desc)
+            hard_issues.append(issue_payload)
+        elif category in STORY_REVIEW_CATEGORIES and not quality_gate_override:
             story_issues.append(issue_payload)
         elif sev in BLOCKING_SEVERITIES:
             errors.append(desc)

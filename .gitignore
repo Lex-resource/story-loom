@@ -52,6 +52,7 @@ data/backups/
 data/agents.json
 data/pipelines.json
 data/tokenizer/
+data/research_runs/
 
 # ===== 日志 =====
 logs/
@@ -64,6 +65,11 @@ logs/
 
 # ===== 运行时产物 =====
 .codegraph/
+
+# ===== 本地工具配置（含个人路径，勿提交） =====
+.agents/
+.trae-html-share-packages/
+config/mcporter.json
 
 # ===== IDE / 编辑器 =====
 .vscode/

@@ -2,7 +2,11 @@
 import hashlib
 import json
 
-from services.vector_constants import VECTOR_SOURCE_SETTING
+from services.vector_constants import (
+    VECTOR_SETTING_CHARACTER_ID_TEMPLATE,
+    VECTOR_SOURCE_SETTING,
+    VECTOR_TYPE_CHARACTER_STATE,
+)
 from services.living_docs_parsers import parse_bullet_points, parse_character_state
 from services.knowledge_constants import FORESHADOWING_STATUS_ACTIVE
 from services.knowledge_markdown import knowledge_from_markdown
@@ -26,6 +30,20 @@ def settings_content_hash(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def character_setting_vector_id(name: str) -> str:
+    return VECTOR_SETTING_CHARACTER_ID_TEMPLATE.format(name=name)
+
+
+def build_character_manifest_vector_item(name: str, manifest_data: dict) -> dict:
+    return {
+        "id": character_setting_vector_id(name),
+        "description": json.dumps(manifest_data, ensure_ascii=False, sort_keys=True),
+        "source": VECTOR_SOURCE_SETTING,
+        "type": VECTOR_TYPE_CHARACTER_STATE,
+        "name": name,
+    }
+
+
 def build_setting_entries(
     character_state: str,
     world_state: str,
@@ -38,9 +56,9 @@ def build_setting_entries(
     for name, block in parse_character_state(character_state):
         entries.append(
             (
-                f"setting_character_{name}",
+                character_setting_vector_id(name),
                 block,
-                {"source": VECTOR_SOURCE_SETTING, "type": "character_state", "name": name},
+                {"source": VECTOR_SOURCE_SETTING, "type": VECTOR_TYPE_CHARACTER_STATE, "name": name},
             )
         )
 

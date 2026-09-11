@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import GraphToolbar from './GraphToolbar';
+import { knowledgeGraphApi } from '../../services/novelApi';
+import { createRequestGuard } from '../../utils/requestLifecycle';
 
-export default function PlotTracksView({ projectId, apiBase }) {
+export default function PlotTracksView({ projectId }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -9,37 +11,36 @@ export default function PlotTracksView({ projectId, apiBase }) {
 
   useEffect(() => {
     if (!projectId) return;
-    let cancelled = false;
+    const requestGuard = createRequestGuard();
+    const request = requestGuard.start();
 
     const loadData = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${apiBase}/writing/${projectId}/plot-tracks`);
-        const json = res.ok ? await res.json() : { threads: [], events: [] };
-        if (!cancelled) setData(json);
+        const json = await knowledgeGraphApi.plotTracks(projectId, { signal: request.signal });
+        if (request.isCurrent()) setData(json);
       } catch (err) {
-        console.error('Failed to load plot tracks:', err);
+        if (request.isCurrent() && err.name !== 'AbortError') {
+          console.error('Failed to load plot tracks:', err);
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (request.isCurrent()) setLoading(false);
       }
     };
-    
+
     loadData();
 
     return () => {
-      cancelled = true;
+      requestGuard.cancel();
     };
-  }, [projectId, apiBase]);
+  }, [projectId]);
 
   const q = search.toLowerCase().trim();
   const events = (data?.events || [])
     .filter((ev) => selectedThread === 'All' || ev.thread === selectedThread)
     .filter((ev) => {
       if (!q) return true;
-      return (
-        ev.thread.toLowerCase().includes(q) ||
-        ev.progress.toLowerCase().includes(q)
-      );
+      return ev.thread.toLowerCase().includes(q) || ev.progress.toLowerCase().includes(q);
     });
 
   return (
@@ -47,15 +48,9 @@ export default function PlotTracksView({ projectId, apiBase }) {
       <header className="kg-view-header">
         <div>
           <h3 className="kg-view-title">剧情主脉演进图</h3>
-          <p className="kg-view-desc">
-            分线索显示各故事主脉及支线随章节向前推进的历史记录。
-          </p>
+          <p className="kg-view-desc">分线索显示各故事主脉及支线随章节向前推进的历史记录。</p>
         </div>
-        <GraphToolbar
-          searchValue={search}
-          onSearchChange={setSearch}
-          searchPlaceholder="搜索剧情事件…"
-        >
+        <GraphToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder="搜索剧情事件…">
           <select
             className="form-input kg-thread-select"
             value={selectedThread}
@@ -63,7 +58,9 @@ export default function PlotTracksView({ projectId, apiBase }) {
           >
             <option value="All">全部线索</option>
             {data?.threads?.map((t) => (
-              <option key={t} value={t}>{t}</option>
+              <option key={t} value={t}>
+                {t}
+              </option>
             ))}
           </select>
         </GraphToolbar>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.pipeline_types import ChapterStatus
 from worker_support.generation_policy_types import GenerationLoopState, GenerationStartState
 
 
@@ -65,6 +66,25 @@ def initial_generation_decision(start_step: str) -> str:
 
 def chapter_has_content(chapter) -> bool:
     return bool(chapter and (chapter.edited_content or chapter.draft_content or chapter.content))
+
+
+def should_resume_extractor(start_step: str, chapter) -> bool:
+    """Return whether a chapter can resume directly at post-processing.
+
+    A failed or interrupted extractor has already completed writing and
+    validation. Re-running Writer or Validator can mutate otherwise valid
+    prose, so these durable states must bypass the earlier pipeline stages.
+    """
+    return bool(
+        start_step == "extractor"
+        and chapter
+        and chapter.status
+        in {
+            ChapterStatus.POSTPROCESS_FAILED,
+            ChapterStatus.POST_PROCESSING,
+            ChapterStatus.VALIDATED,
+        }
+    )
 
 
 def should_advance_from_planner_to_writer(

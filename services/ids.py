@@ -15,6 +15,14 @@ def parse_project_id(project_id: str) -> uuid.UUID:
         raise HTTPException(status_code=422, detail="Invalid project_id")
 
 
+def parse_job_id(job_id: str) -> uuid.UUID:
+    """Return a UUID for job_id or raise the API's standard 422 error."""
+    try:
+        return uuid.UUID(job_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid job_id")
+
+
 def is_project_id(project_id: str) -> bool:
     """Return True when project_id is a syntactically valid UUID."""
     try:

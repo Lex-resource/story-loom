@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -70,3 +71,32 @@ def test_claim_pending_jobs_respects_capacity_limit(monkeypatch):
     assert claimed == ["job-1"]
     assert first.status == JobStatus.RUNNING
     assert second.status == JobStatus.PENDING
+
+
+def test_claim_paused_returns_empty_without_touching_db(monkeypatch, freeze_tunables):
+    """全局暂停领取:开关开启时直接返回空,连 DB 查询都不发。
+
+    在跑任务继续到检查点 —— 暂停语义是"不领新任务",不是杀任务。
+    """
+    freeze_tunables(worker_claim_paused=True)
+
+    def _boom():
+        raise AssertionError("paused claim must not query the DB")
+
+    monkeypatch.setattr(orchestrator, "async_session", _boom)
+
+    claimed = asyncio.run(orchestrator.claim_pending_jobs(2))
+
+    assert claimed == []
+
+
+def test_claim_pending_jobs_fails_unknown_job_types(monkeypatch):
+    unknown = SimpleNamespace(id="job-unknown", type="future_job", status=JobStatus.PENDING)
+    factory = _SessionFactory([(unknown, NovelStatus.GENERATING)])
+    monkeypatch.setattr(orchestrator, "async_session", lambda: factory)
+
+    claimed = asyncio.run(orchestrator.claim_pending_jobs(1))
+
+    assert claimed == []
+    assert unknown.status == JobStatus.FAILED
+    assert json.loads(unknown.error)["error"] == "Unsupported job type: future_job"

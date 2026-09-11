@@ -75,9 +75,17 @@ def storage_health_report() -> dict:
             "parent_exists": parent.exists(),
             "writable": bool(parent.exists() and os.access(parent, os.W_OK)),
         }
+    # chroma 启动预热健康标志（services/vector_chroma.preload_chroma 写入）：
+    # unknown=未预热（预热关闭或尚未跑到），failed=读写探针失败 —— chroma 仍
+    # 可用但召回走"异常→空记忆"降级，应查启动日志。
+    from services.vector_chroma import chroma_warmup_ok
+
+    warmup = "ok" if chroma_warmup_ok else ("unknown" if chroma_warmup_ok is None else "failed")
+
     return {
         "authorities": [authority.__dict__ for authority in STORAGE_AUTHORITIES],
         "checks": checks,
+        "chroma_warmup": warmup,
     }
 
 

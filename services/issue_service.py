@@ -1,58 +1,103 @@
+"""Persistence operations for generated issue summaries.
+
+This module is deliberately HTTP-independent. Routers own request parsing and
+exception mapping; workers can reuse these operations without importing
+FastAPI.
+"""
+
+from __future__ import annotations
+
 import uuid
-from fastapi import Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy import select
-from database import get_db
-from models.novel import RawIssue, IssueSummary
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.novel import IssueSummary, RawIssue
+
+DEFAULT_ISSUE_PAGE_SIZE = 200
+MAX_ISSUE_PAGE_SIZE = 500
 
 
-async def get_raw_issues(project_id: str, db: AsyncSession = Depends(get_db)):
+def _apply_page(statement, limit: int | None, offset: int):
+    if limit is None:
+        return statement
+    bounded_limit = min(max(int(limit), 1), MAX_ISSUE_PAGE_SIZE)
+    bounded_offset = max(int(offset), 0)
+    return statement.limit(bounded_limit).offset(bounded_offset)
+
+
+async def list_raw_issues(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict]:
     result = await db.execute(
-        select(RawIssue).where(RawIssue.project_id == uuid.UUID(project_id)).order_by(RawIssue.chapter_index)
+        _apply_page(
+            select(RawIssue)
+            .where(RawIssue.project_id == project_id)
+            .order_by(RawIssue.chapter_index, RawIssue.id),
+            limit,
+            offset,
+        )
     )
-    issues = result.scalars().all()
-    return [{"chapter_index": i.chapter_index, "category": i.category, "description": i.description, "severity": i.severity} for i in issues]
-
-
-class ToggleIssueRequest(BaseModel):
-    enabled: bool
-
-
-async def get_issue_summaries(project_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(IssueSummary).where(IssueSummary.project_id == uuid.UUID(project_id))
-    )
-    summaries = result.scalars().all()
     return [
         {
-            "id": str(s.id),
-            "category": s.category,
-            "summary": s.summary,
-            "severity": s.severity,
-            "examples": s.examples,
-            "enabled": s.enabled
+            "chapter_index": issue.chapter_index,
+            "category": issue.category,
+            "description": issue.description,
+            "severity": issue.severity,
         }
-        for s in summaries
+        for issue in result.scalars().all()
     ]
 
 
-async def toggle_issue_summary(
-    project_id: str,
-    issue_id: str,
-    data: ToggleIssueRequest,
-    db: AsyncSession = Depends(get_db)
-):
+async def list_issue_summaries(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict]:
+    result = await db.execute(
+        _apply_page(
+            select(IssueSummary)
+            .where(IssueSummary.project_id == project_id)
+            .order_by(IssueSummary.category, IssueSummary.id),
+            limit,
+            offset,
+        )
+    )
+    return [
+        {
+            "id": str(summary.id),
+            "category": summary.category,
+            "summary": summary.summary,
+            "severity": summary.severity,
+            "examples": summary.examples,
+            "enabled": summary.enabled,
+        }
+        for summary in result.scalars().all()
+    ]
+
+
+async def set_issue_summary_enabled(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    issue_id: uuid.UUID,
+    enabled: bool,
+) -> dict:
     result = await db.execute(
         select(IssueSummary).where(
-            IssueSummary.project_id == uuid.UUID(project_id),
-            IssueSummary.id == uuid.UUID(issue_id)
+            IssueSummary.project_id == project_id,
+            IssueSummary.id == issue_id,
         )
     )
     summary = result.scalar_one_or_none()
-    if not summary:
-        raise HTTPException(status_code=404, detail="Issue summary not found")
+    if summary is None:
+        raise LookupError("Issue summary not found")
 
-    summary.enabled = data.enabled
+    summary.enabled = enabled
     await db.commit()
-    return {"status": "success", "id": issue_id, "enabled": summary.enabled}
+    return {"status": "success", "id": str(issue_id), "enabled": summary.enabled}

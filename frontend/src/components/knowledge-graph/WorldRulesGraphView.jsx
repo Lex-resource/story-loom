@@ -4,6 +4,8 @@ import GraphDetailPanel from './GraphDetailPanel';
 import GraphToolbar from './GraphToolbar';
 import { WORLD_PHYSICS_OPTIONS, TAG_COLORS } from './graphTheme';
 import { filterBySearch, toVisWorldData, graphStats } from './graphTransforms';
+import { knowledgeGraphApi } from '../../services/novelApi';
+import { createRequestGuard } from '../../utils/requestLifecycle';
 
 const LEGEND_ITEMS = [
   { key: 'rule', label: '编译法则' },
@@ -13,7 +15,7 @@ const LEGEND_ITEMS = [
   { key: 'confirmed', label: '已验真理' },
 ];
 
-export default function WorldRulesGraphView({ projectId, apiBase }) {
+export default function WorldRulesGraphView({ projectId }) {
   const [rawData, setRawData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -22,27 +24,27 @@ export default function WorldRulesGraphView({ projectId, apiBase }) {
 
   useEffect(() => {
     if (!projectId) return;
-    let cancelled = false;
+    const requestGuard = createRequestGuard();
+    const request = requestGuard.start();
     setLoading(true);
     setError(null);
 
-    fetch(`${apiBase}/writing/${projectId}/world-rules-tree`)
-      .then((res) => {
-        if (!res.ok) throw new Error('加载天地法则编译网失败');
-        return res.json();
-      })
+    knowledgeGraphApi
+      .worldRulesTree(projectId, { signal: request.signal })
       .then((data) => {
-        if (!cancelled) setRawData(data);
+        if (request.isCurrent()) setRawData(data);
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message);
+        if (request.isCurrent() && err.name !== 'AbortError') setError(err.message);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (request.isCurrent()) setLoading(false);
       });
 
-    return () => { cancelled = true; };
-  }, [projectId, apiBase]);
+    return () => {
+      requestGuard.cancel();
+    };
+  }, [projectId]);
 
   const { visData, stats } = useMemo(() => {
     if (!rawData) return { visData: null, stats: null };
@@ -54,41 +56,34 @@ export default function WorldRulesGraphView({ projectId, apiBase }) {
     };
   }, [rawData, search]);
 
-  const handleNodeClick = useCallback((params) => {
-    if (!params.nodes.length || !rawData) {
-      setDetail(null);
-      return;
-    }
-    const nodeId = params.nodes[0];
-    if (rawData.details?.[nodeId]) {
-      setDetail({
-        title: rawData.details[nodeId].tag_display || '天地法则',
-        content: rawData.details[nodeId].content,
-      });
-      return;
-    }
-    const node = (rawData.nodes || []).find((n) => n.id === nodeId);
-    setDetail(
-      node
-        ? { title: node.label, content: node.title || '世界观编译节点' }
-        : null,
-    );
-  }, [rawData]);
+  const handleNodeClick = useCallback(
+    (params) => {
+      if (!params.nodes.length || !rawData) {
+        setDetail(null);
+        return;
+      }
+      const nodeId = params.nodes[0];
+      if (rawData.details?.[nodeId]) {
+        setDetail({
+          title: rawData.details[nodeId].tag_display || '天地法则',
+          content: rawData.details[nodeId].content,
+        });
+        return;
+      }
+      const node = (rawData.nodes || []).find((n) => n.id === nodeId);
+      setDetail(node ? { title: node.label, content: node.title || '世界观编译节点' } : null);
+    },
+    [rawData],
+  );
 
   return (
     <div className="kg-view">
       <header className="kg-view-header">
         <div>
           <h3 className="kg-view-title">天地法则编译网</h3>
-          <p className="kg-view-desc">
-            分类展示世界观核心法则、空间地理、势力组织及禁忌设定。
-          </p>
+          <p className="kg-view-desc">分类展示世界观核心法则、空间地理、势力组织及禁忌设定。</p>
         </div>
-        <GraphToolbar
-          searchValue={search}
-          onSearchChange={setSearch}
-          searchPlaceholder="搜索法则或势力…"
-        />
+        <GraphToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder="搜索法则或势力…" />
       </header>
 
       <div className="kg-legend">

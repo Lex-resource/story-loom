@@ -7,6 +7,7 @@ from agents.constants import AGENT_PLANNER, AGENT_WRITER, AGENT_EDITOR, AGENT_VA
 from agents.agent_io import EditorOutput, ExtractorOutput, PlannerOutput, ValidatorOutput, WriterOutput
 from agents.pipeline_context import PipelineContext
 from agents.pipeline_payload import bind_payload_fields, bind_truthy_payload_fields
+from services.context_compaction import memory_context_breakdown
 
 
 class NodeExecutionError(Exception):
@@ -98,6 +99,13 @@ def make_node(name: str, **kwargs: Any) -> "PipelineNode":
 class PipelineNode:
     name: str
 
+    @staticmethod
+    def _bind_memory_metrics(context: PipelineContext, agent: Any) -> None:
+        """Expose rendered memory size to the local experiment recorder."""
+        breakdown = memory_context_breakdown(context)
+        agent.last_memory_context_breakdown = breakdown
+        agent.last_memory_context_chars = sum(breakdown.values())
+
     async def run(self, context: PipelineContext, payload: dict[str, Any]) -> Any:
         raise NotImplementedError
 
@@ -142,6 +150,7 @@ class PlannerNode(PipelineNode):
 
     async def run(self, context: PipelineContext, payload: dict[str, Any]) -> PlannerOutput:
         context = self._fork(context)
+        self._bind_memory_metrics(context, self.agent)
         bind_truthy_payload_fields(
             context,
             payload,
@@ -168,6 +177,7 @@ class WriterNode(PipelineNode):
 
     async def run(self, context: PipelineContext, payload: dict[str, Any]) -> WriterOutput:
         context = self._fork(context)
+        self._bind_memory_metrics(context, self.agent)
         bind_truthy_payload_fields(
             context,
             payload,
@@ -204,6 +214,7 @@ class EditorNode(PipelineNode):
 
     async def run(self, context: PipelineContext, payload: dict[str, Any]) -> EditorOutput:
         context = self._fork(context)
+        self._bind_memory_metrics(context, self.agent)
         bind_truthy_payload_fields(
             context,
             payload,
@@ -239,6 +250,7 @@ class ValidatorNode(PipelineNode):
 
     async def run(self, context: PipelineContext, payload: dict[str, Any]) -> ValidatorOutput:
         context = self._fork(context)
+        self._bind_memory_metrics(context, self.agent)
         bind_payload_fields(
             context,
             payload,
@@ -265,6 +277,7 @@ class ExtractorNode(PipelineNode):
 
     async def run(self, context: PipelineContext, payload: dict[str, Any]) -> ExtractorOutput:
         context = self._fork(context)
+        self._bind_memory_metrics(context, self.agent)
         bind_payload_fields(context, payload, {"chapter_content": "chapter_content"})
         if "chapter_content" not in payload and "content" in payload:
             context.chapter_content = payload["content"]

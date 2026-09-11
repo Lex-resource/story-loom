@@ -5,6 +5,64 @@ from services.knowledge_constants import (
     CHARACTER_GROUP_SUPPORTING,
 )
 from services.knowledge_patch_handlers import relationships_for_attributes
+from services.character_constants import CHARACTER_IMPORTANCE_HIGH
+
+
+def build_character_domain_graph(cards, relationships, manifests=None) -> dict:
+    """Build graph nodes and edges from canonical character tables."""
+    manifest_by_id = {
+        manifest.character_id: manifest.data or {}
+        for manifest in (manifests or [])
+    }
+    name_by_id = {card.id: card.name for card in cards}
+    nodes = []
+    details = {}
+    for card in cards:
+        data = card.card_data or {}
+        identity = data.get("identity") or {}
+        group = character_group_for_card(card)
+        nodes.append({
+            "id": card.name,
+            "label": card.name,
+            "group": group,
+            "title": f"{card.name} ({group})",
+        })
+        manifest = manifest_by_id.get(card.id, {})
+        details[card.name] = "\n".join(
+            part for part in (
+                f"身份: {manifest.get('role_summary', '')}",
+                f"性格: {manifest.get('personality_summary', '')}",
+                f"位置: {manifest.get('current_location', '')}",
+                f"状态: {manifest.get('current_emotion', '')}",
+            ) if part.split(": ", 1)[-1]
+        ) or "暂无详细背景记录"
+
+    edges = []
+    for relationship in relationships:
+        source = name_by_id.get(relationship.source_character_id)
+        target = name_by_id.get(relationship.target_character_id)
+        if not source or not target:
+            continue
+        edges.append({
+            "from": source,
+            "to": target,
+            "label": relationship.relation_type,
+        })
+    return {"nodes": nodes, "edges": edges, "details": details}
+
+
+def character_group_for_card(card) -> str:
+    data = card.card_data or {}
+    identity = data.get("identity") or {}
+    role_text = " ".join(
+        str(identity.get(key) or "")
+        for key in ("role", "faction", "camp", "stance")
+    )
+    if CHARACTER_GROUP_PROTAGONIST in role_text or card.importance == CHARACTER_IMPORTANCE_HIGH:
+        return CHARACTER_GROUP_PROTAGONIST
+    if CHARACTER_GROUP_ANTAGONIST in role_text:
+        return CHARACTER_GROUP_ANTAGONIST
+    return CHARACTER_GROUP_SUPPORTING
 
 
 def build_character_graph(items) -> dict:

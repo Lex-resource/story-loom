@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from agents.context_bundle import AgentContextBundle, build_agent_context_bundle
+
 
 @dataclass
 class ContextData:
@@ -18,6 +20,11 @@ class ContextData:
     chapter_outline: dict[str, Any] | None = None
     knowledge: dict[str, Any] | None = None
     previous_ending: str = ""
+    chapter_handoff: dict[str, Any] | None = None
+    chapter_handoff_context: str = ""
+    chapter_contract: dict[str, Any] | None = None
+    chapter_contract_context: str = ""
+    writer_execution_brief_context: str = ""
     short_term_context: str = ""
     full_manuscript_context: str = ""
     world_state: str = ""
@@ -26,9 +33,15 @@ class ContextData:
     plot_threads: str = ""
     raw_world_state: str = ""
     raw_character_state: str = ""
+    character_manifest_context: str = ""
+    character_card_context: str = ""
+    novel_memory_context: str = ""
+    narrative_index_context: str = ""
     raw_foreshadowing: str = ""
     raw_plot_threads: str = ""
     intervention: Optional[str] = None
+    context_bundle: AgentContextBundle | None = None
+    context_sources: dict[str, Any] | None = None
     reference_style: str = ""
     total_chapters: int = 0
 
@@ -62,6 +75,11 @@ class PipelineContext:
     chapter_outline: dict[str, Any] | None = None
     knowledge: dict[str, Any] | None = None
     previous_ending: str = ""
+    chapter_handoff: dict[str, Any] | None = None
+    chapter_handoff_context: str = ""
+    chapter_contract: dict[str, Any] | None = None
+    chapter_contract_context: str = ""
+    writer_execution_brief_context: str = ""
     short_term_context: str = ""
     full_manuscript_context: str = ""
     world_state: str = ""
@@ -70,9 +88,15 @@ class PipelineContext:
     plot_threads: str = ""
     raw_world_state: str = ""
     raw_character_state: str = ""
+    character_manifest_context: str = ""
+    character_card_context: str = ""
+    novel_memory_context: str = ""
+    narrative_index_context: str = ""
     raw_foreshadowing: str = ""
     raw_plot_threads: str = ""
     intervention: Optional[str] = None
+    context_bundle: AgentContextBundle | None = None
+    context_sources: dict[str, Any] | None = None
 
     # Pipeline specific execution fields
     issue_summaries: str = ""
@@ -88,7 +112,22 @@ class PipelineContext:
     total_chapters: int = 0
 
     @classmethod
-    def from_memory(cls, project_id: str, chapter_index: int, memory: dict[str, Any]) -> "PipelineContext":
+    def from_memory(
+        cls,
+        project_id: str,
+        chapter_index: int,
+        memory: dict[str, Any],
+        *,
+        agent_type: str | None = None,
+    ) -> "PipelineContext":
+        resolved_agent_type = agent_type or memory.get("agent_type") or "writer"
+        bundle_memory = dict(memory)
+        bundle_memory["project_id"] = project_id
+        bundle_memory["chapter_index"] = chapter_index
+        bundle = build_agent_context_bundle(
+            bundle_memory,
+            agent_type=resolved_agent_type,
+        )
         return cls(
             project_id=project_id,
             chapter_index=chapter_index,
@@ -100,6 +139,11 @@ class PipelineContext:
             chapter_outline=memory.get("chapter_outline"),
             knowledge=memory.get("knowledge"),
             previous_ending=memory.get("previous_ending", ""),
+            chapter_handoff=memory.get("chapter_handoff"),
+            chapter_handoff_context=memory.get("chapter_handoff_context", ""),
+            chapter_contract=memory.get("chapter_contract"),
+            chapter_contract_context=memory.get("chapter_contract_context", ""),
+            writer_execution_brief_context=memory.get("writer_execution_brief_context", ""),
             short_term_context=memory.get("short_term_context", ""),
             full_manuscript_context=memory.get("full_manuscript_context", ""),
             world_state=memory.get("world_state", ""),
@@ -108,9 +152,15 @@ class PipelineContext:
             plot_threads=memory.get("plot_threads", ""),
             raw_world_state=memory.get("raw_world_state", ""),
             raw_character_state=memory.get("raw_character_state", ""),
+            character_manifest_context=memory.get("character_manifest_context", ""),
+            character_card_context=memory.get("character_card_context", ""),
+            novel_memory_context=memory.get("novel_memory_context", ""),
+            narrative_index_context=memory.get("narrative_index_context", ""),
             raw_foreshadowing=memory.get("raw_foreshadowing", ""),
             raw_plot_threads=memory.get("raw_plot_threads", ""),
             intervention=memory.get("intervention"),
+            context_bundle=bundle,
+            context_sources=memory.get("context_sources"),
             reference_style=memory.get("reference_style", ""),
             vector_context=memory.get("vector_context", ""),
             rewrite_instructions=memory.get("rewrite_instructions", ""),
@@ -129,6 +179,8 @@ class PipelineContext:
             "style": self.style,
             "world_state": self.world_state,
             "character_state": self.character_state,
+            "character_manifest_context": self.character_manifest_context,
+            "character_card_context": self.character_card_context,
             "foreshadowing": self.foreshadowing,
             "plot_threads": self.plot_threads,
             "previous_ending": self.previous_ending,
@@ -147,6 +199,11 @@ class PipelineContext:
             chapter_outline=self.chapter_outline,
             knowledge=self.knowledge,
             previous_ending=self.previous_ending,
+            chapter_handoff=self.chapter_handoff,
+            chapter_handoff_context=self.chapter_handoff_context,
+            chapter_contract=self.chapter_contract,
+            chapter_contract_context=self.chapter_contract_context,
+            writer_execution_brief_context=self.writer_execution_brief_context,
             short_term_context=self.short_term_context,
             full_manuscript_context=self.full_manuscript_context,
             world_state=self.world_state,
@@ -155,9 +212,15 @@ class PipelineContext:
             plot_threads=self.plot_threads,
             raw_world_state=self.raw_world_state,
             raw_character_state=self.raw_character_state,
+            character_manifest_context=self.character_manifest_context,
+            character_card_context=self.character_card_context,
+            novel_memory_context=self.novel_memory_context,
+            narrative_index_context=self.narrative_index_context,
             raw_foreshadowing=self.raw_foreshadowing,
             raw_plot_threads=self.raw_plot_threads,
             intervention=self.intervention,
+            context_bundle=self.context_bundle,
+            context_sources=self.context_sources,
             reference_style=self.reference_style,
             total_chapters=self.total_chapters,
         )
@@ -190,6 +253,11 @@ class PipelineContext:
             chapter_outline=data.chapter_outline,
             knowledge=data.knowledge,
             previous_ending=data.previous_ending,
+            chapter_handoff=data.chapter_handoff,
+            chapter_handoff_context=data.chapter_handoff_context,
+            chapter_contract=data.chapter_contract,
+            chapter_contract_context=data.chapter_contract_context,
+            writer_execution_brief_context=data.writer_execution_brief_context,
             short_term_context=data.short_term_context,
             full_manuscript_context=data.full_manuscript_context,
             world_state=data.world_state,
@@ -198,9 +266,15 @@ class PipelineContext:
             plot_threads=data.plot_threads,
             raw_world_state=data.raw_world_state,
             raw_character_state=data.raw_character_state,
+            character_manifest_context=data.character_manifest_context,
+            character_card_context=data.character_card_context,
+            novel_memory_context=data.novel_memory_context,
+            narrative_index_context=data.narrative_index_context,
             raw_foreshadowing=data.raw_foreshadowing,
             raw_plot_threads=data.raw_plot_threads,
             intervention=data.intervention,
+            context_bundle=data.context_bundle,
+            context_sources=data.context_sources,
             reference_style=data.reference_style,
             total_chapters=data.total_chapters,
             issue_summaries=payload.issue_summaries,
@@ -225,3 +299,30 @@ class PipelineContext:
         self.draft_content = payload.draft_content
         self.title = payload.title
         self.enable_light_polish = payload.enable_light_polish
+
+    def get_context_bundle(self, agent_type: str | None = None) -> AgentContextBundle:
+        """Build a fresh role-specific bundle from current mutable fields."""
+        memory = {
+            "project_id": self.project_id,
+            "chapter_index": self.chapter_index,
+            "context_sources": self.context_sources,
+            "global_outline": self.global_outline,
+            "chapter_outline": self.chapter_outline,
+            "chapter_handoff_context": self.chapter_handoff_context,
+            "chapter_contract_context": self.chapter_contract_context,
+            "writer_execution_brief_context": self.writer_execution_brief_context,
+            "character_manifest_context": self.character_manifest_context,
+            "character_card_context": self.character_card_context,
+            "novel_memory_context": self.novel_memory_context,
+            "narrative_index_context": self.narrative_index_context,
+            "vector_context": self.vector_context,
+            "world_state": self.world_state,
+            "character_state": self.character_state,
+            "foreshadowing": self.foreshadowing,
+            "plot_threads": self.plot_threads,
+        }
+        return build_agent_context_bundle(
+            memory,
+            agent_type=agent_type
+            or (self.context_bundle.agent_type if self.context_bundle else "writer"),
+        )

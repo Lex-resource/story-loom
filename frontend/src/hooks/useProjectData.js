@@ -1,5 +1,9 @@
+import { useEffect, useRef } from 'react';
+
 import { useProjectStore } from '../store/useStore';
-import { API_BASE, requestJson } from '../services/api';
+import { requestJson } from '../services/api';
+import { projectApi } from '../services/novelApi';
+import { createRequestGuard, isCurrentProject } from '../utils/requestLifecycle';
 
 export default function useProjectData({
   addLog,
@@ -24,33 +28,52 @@ export default function useProjectData({
   setStreamingEvaluations,
   setCurrentFlowStep,
   setOutlineMode,
-  setLivingDocs,
-  setDocVersions,
   setSettingsData,
-  setTokenStats,
 }) {
-const loadProjects = async ({ silent = false } = {}) => {
-  if (!silent) setProjectsLoading(true);
-  try {
-    const data = await requestJson('/writing/projects');
-    setProjects(data);
-    setActiveProject(prev => {
-      if (prev) {
-        const updated = data.find(p => p.id === prev.id);
-        return updated || prev;
-      }
-      return prev;
-    });
-  } catch (e) {
-    addLog('系统', `加载项目失败: ${e.message}`, 'error');
-  } finally {
-    if (!silent) setProjectsLoading(false);
-  }
-};
+  const projectsRequestGuardRef = useRef(null);
+  const settingsRequestGuardRef = useRef(null);
+  const settingsSaveQueueRef = useRef(Promise.resolve());
+  const projectStatusFetchSeqRef = useRef(0);
+  if (!projectsRequestGuardRef.current) projectsRequestGuardRef.current = createRequestGuard();
+  if (!settingsRequestGuardRef.current) settingsRequestGuardRef.current = createRequestGuard();
 
-const loadProjectStatus = async (id, { fromPoll = false, signal } = {}) => {
-  try {
-    const data = await requestJson(`/writing/${id}/status`, { signal });
+  useEffect(
+    () => () => {
+      projectsRequestGuardRef.current.cancel();
+      settingsRequestGuardRef.current.cancel();
+    },
+    [],
+  );
+
+  const loadProjects = async ({ silent = false } = {}) => {
+    if (!silent) setProjectsLoading(true);
+    const request = projectsRequestGuardRef.current.start();
+    try {
+      // 端点定义唯一来源是 novelApi.projectApi.list,这里不再手写路径
+      const data = await projectApi.list({ signal: request.signal });
+      if (!request.isCurrent()) return undefined;
+      setProjects(data);
+      setActiveProject((prev) => {
+        if (prev) {
+          const updated = data.find((p) => p.id === prev.id);
+          return updated || prev;
+        }
+        return prev;
+      });
+      return data;
+    } catch (e) {
+      if (!request.isCurrent() || e.name === 'AbortError') return undefined;
+      addLog('系统', `加载项目失败: ${e.message}`, 'error');
+    } finally {
+      if (request.isCurrent()) setProjectsLoading(false);
+    }
+  };
+
+  const loadProjectStatus = async (id, { fromPoll = false, signal } = {}) => {
+    const requestSeq = ++projectStatusFetchSeqRef.current;
+    try {
+      const data = await requestJson(`/writing/${id}/status`, { signal });
+      if (requestSeq !== projectStatusFetchSeqRef.current || !isCurrentProject(activeProjectRef, id)) return;
       // Compare prev status with data BEFORE the updater — avoid side effects inside setState.
       // Read from the store (not the captured state) since this runs from poll/WS closures.
       const prevStatus = useProjectStore.getState().activeProjectStatus;
@@ -101,7 +124,7 @@ const loadProjectStatus = async (id, { fromPoll = false, signal } = {}) => {
               word_count_per_chapter: data.word_count_per_chapter ?? prev.word_count_per_chapter,
               optimize_interval: data.optimize_interval ?? prev.optimize_interval,
             }
-          : prev
+          : prev,
       );
       setProjects((prev) =>
         prev.map((p) =>
@@ -117,75 +140,80 @@ const loadProjectStatus = async (id, { fromPoll = false, signal } = {}) => {
                 word_count_per_chapter: data.word_count_per_chapter ?? p.word_count_per_chapter,
                 optimize_interval: data.optimize_interval ?? p.optimize_interval,
               }
-            : p
-        )
+            : p,
+        ),
       );
-  } catch (e) {
-    // F-22: Silently ignore aborted fetches from project switching
-    if (e.name === 'AbortError') return;
-    console.error(e);
-    showToast('加载项目状态失败');
-  }
-};
+    } catch (e) {
+      // F-22: Silently ignore aborted fetches from project switching
+      if (
+        requestSeq !== projectStatusFetchSeqRef.current ||
+        !isCurrentProject(activeProjectRef, id) ||
+        e.name === 'AbortError'
+      )
+        return;
+      console.error(e);
+      showToast('加载项目状态失败');
+    }
+  };
 
-const loadChapters = async (id, { replace = false, signal } = {}) => {
-  const seq = ++chaptersFetchSeqRef.current;
-  try {
-    const data = await requestJson(`/writing/${id}/chapters`, { signal });
-    if (seq !== chaptersFetchSeqRef.current) return;
+  const loadChapters = async (id, { replace = false, signal } = {}) => {
+    const seq = ++chaptersFetchSeqRef.current;
+    try {
+      const data = await requestJson(`/writing/${id}/chapters`, { signal });
+      if (seq !== chaptersFetchSeqRef.current || !isCurrentProject(activeProjectRef, id)) return;
+      setChapters((prev) => {
+        if (replace || prev.length === 0) return data;
+        const map = new Map();
+        for (const ch of prev) map.set(ch.chapter_index, ch);
+        for (const ch of data) {
+          map.set(ch.chapter_index, { ...map.get(ch.chapter_index), ...ch });
+        }
+        return Array.from(map.values()).sort((a, b) => a.chapter_index - b.chapter_index);
+      });
+    } catch (e) {
+      // F-22: Silently ignore aborted fetches from project switching
+      if (seq !== chaptersFetchSeqRef.current || !isCurrentProject(activeProjectRef, id) || e.name === 'AbortError')
+        return;
+      console.error(e);
+      showToast('加载章节列表失败');
+    }
+  };
+
+  const scheduleLoadChapters = (id, delayMs = 500) => {
+    if (chaptersDebounceRef.current) clearTimeout(chaptersDebounceRef.current);
+    chaptersDebounceRef.current = setTimeout(() => {
+      chaptersDebounceRef.current = null;
+      loadChapters(id);
+    }, delayMs);
+  };
+
+  const ensureChapterInList = (chapterIndex) => {
+    if (!chapterIndex || chapterIndex <= 0) return;
     setChapters((prev) => {
-      if (replace || prev.length === 0) return data;
-      const map = new Map();
-      for (const ch of prev) map.set(ch.chapter_index, ch);
-      for (const ch of data) {
-        map.set(ch.chapter_index, { ...map.get(ch.chapter_index), ...ch });
-      }
-      return Array.from(map.values()).sort((a, b) => a.chapter_index - b.chapter_index);
+      if (prev.some((ch) => ch.chapter_index === chapterIndex)) return prev;
+      return [...prev, { chapter_index: chapterIndex, title: `第${chapterIndex}章`, status: 'draft' }].sort(
+        (a, b) => a.chapter_index - b.chapter_index,
+      );
     });
-  } catch (e) {
-    // F-22: Silently ignore aborted fetches from project switching
-    if (e.name === 'AbortError') return;
-    console.error(e);
-    showToast('加载章节列表失败');
-  }
-};
+  };
 
-const scheduleLoadChapters = (id, delayMs = 500) => {
-  if (chaptersDebounceRef.current) clearTimeout(chaptersDebounceRef.current);
-  chaptersDebounceRef.current = setTimeout(() => {
-    chaptersDebounceRef.current = null;
-    loadChapters(id);
-  }, delayMs);
-};
+  const loadChapterDetails = async (projectId, chapterIndex, options = {}) => {
+    let { preserveOutline = false, preserveContent = false, preserveValidation = false, signal } = options;
 
-const ensureChapterInList = (chapterIndex) => {
-  if (!chapterIndex || chapterIndex <= 0) return;
-  setChapters((prev) => {
-    if (prev.some((ch) => ch.chapter_index === chapterIndex)) return prev;
-    return [
-      ...prev,
-      { chapter_index: chapterIndex, title: `第${chapterIndex}章`, status: 'draft' },
-    ].sort((a, b) => a.chapter_index - b.chapter_index);
-  });
-};
+    const currentStatus = activeProjectRef.current?.status;
+    const currentStep = useProjectStore.getState().currentFlowStep;
+    if (currentStatus === 'generating') {
+      if (currentStep === 'planner') preserveOutline = true;
+      if (currentStep === 'writer' || currentStep === 'editor') preserveContent = true;
+      if (currentStep === 'validator') preserveValidation = true;
+    }
 
-const loadChapterDetails = async (projectId, chapterIndex, options = {}) => {
-  let { preserveOutline = false, preserveContent = false, preserveValidation = false, signal } = options;
-
-  const currentStatus = activeProjectRef.current?.status;
-  const currentStep = useProjectStore.getState().currentFlowStep;
-  if (currentStatus === 'generating') {
-    if (currentStep === 'planner') preserveOutline = true;
-    if (currentStep === 'writer' || currentStep === 'editor') preserveContent = true;
-    if (currentStep === 'validator') preserveValidation = true;
-  }
-
-  // Guard against out-of-order responses: a rapid chapter switch (5 -> 6) must
-  // not let the slower chapter-5 response overwrite the chapter-6 view.
-  const seq = ++chapterDetailsFetchSeqRef.current;
-  try {
-    const data = await requestJson(`/writing/${projectId}/chapters/${chapterIndex}`, { signal });
-      if (seq !== chapterDetailsFetchSeqRef.current) return;
+    // Guard against out-of-order responses: a rapid chapter switch (5 -> 6) must
+    // not let the slower chapter-5 response overwrite the chapter-6 view.
+    const seq = ++chapterDetailsFetchSeqRef.current;
+    try {
+      const data = await requestJson(`/writing/${projectId}/chapters/${chapterIndex}`, { signal });
+      if (seq !== chapterDetailsFetchSeqRef.current || !isCurrentProject(activeProjectRef, projectId)) return;
       const previous = useProjectStore.getState().activeChapter;
       const isSameChapter = previous?.chapter_index === chapterIndex;
       const shouldPreserveContent = preserveContent && isSameChapter;
@@ -196,7 +224,7 @@ const loadChapterDetails = async (projectId, chapterIndex, options = {}) => {
           return {
             ...data,
             draft_content: previous.draft_content || data.draft_content,
-            edited_content: previous.edited_content || data.edited_content
+            edited_content: previous.edited_content || data.edited_content,
           };
         }
         return data;
@@ -216,62 +244,52 @@ const loadChapterDetails = async (projectId, chapterIndex, options = {}) => {
         setValidatorStreamLog('');
         setStreamingEvaluations(null);
       }
-  } catch (e) {
-    // Silently ignore aborted fetches from project switching
-    if (e.name === 'AbortError') return;
-    console.error(e);
-    showToast('加载章节详情失败');
-  }
-};
-
-const loadLivingDocs = async (id) => {
-  try {
-    const [data, versions] = await Promise.all([
-      requestJson(`/writing/${id}/living-docs`),
-      requestJson(`/writing/${id}/living-docs/versions`),
-    ]);
-    setLivingDocs(data);
-    setDocVersions(versions);
-  } catch (e) {
-    console.error(e);
-    showToast('加载活文档设定失败');
-  }
-};
-
-const loadSettings = async () => {
-  try {
-    setSettingsData(await requestJson('/settings'));
-  } catch (e) {
-    console.error(e);
-    showToast('加载设置失败');
-  }
-};
-
-const saveSettings = async (newData) => {
-  try {
-    const saved = await requestJson('/settings', {
-      method: 'POST',
-      body: JSON.stringify(newData)
-    });
-    setSettingsData(saved || newData);
-    showToast('设置已保存', 'success');
-  } catch (e) {
-    showToast(`保存失败: ${e.message}`);
-  }
-};
-
-const loadTokenStats = async (id, modelName = 'All Models') => {
-  try {
-    let url = `${API_BASE}/writing/${id}/token-stats`;
-    if (modelName !== 'All Models') {
-      url += `?model=${encodeURIComponent(modelName)}`;
+    } catch (e) {
+      // Silently ignore aborted fetches from project switching
+      if (
+        seq !== chapterDetailsFetchSeqRef.current ||
+        !isCurrentProject(activeProjectRef, projectId) ||
+        e.name === 'AbortError'
+      )
+        return;
+      console.error(e);
+      showToast('加载章节详情失败');
     }
-    setTokenStats(await requestJson(url));
-  } catch (e) {
-    console.error(e);
-    showToast('加载 Token 统计失败');
-  }
-};
+  };
+
+  const loadSettings = async () => {
+    const request = settingsRequestGuardRef.current.start();
+    try {
+      const data = await requestJson('/settings', { signal: request.signal });
+      if (request.isCurrent()) setSettingsData(data);
+    } catch (e) {
+      if (!request.isCurrent() || e.name === 'AbortError') return;
+      console.error(e);
+      showToast('加载设置失败');
+    }
+  };
+
+  const saveSettings = async (newData) => {
+    settingsRequestGuardRef.current.cancel();
+    const save = async () => {
+      try {
+        const saved = await requestJson('/settings', {
+          method: 'POST',
+          body: JSON.stringify(newData),
+        });
+        setSettingsData(saved || newData);
+        showToast('设置已保存', 'success');
+        return true;
+      } catch (e) {
+        showToast(`保存失败: ${e.message}`);
+        return false;
+      }
+    };
+    const result = settingsSaveQueueRef.current.then(save, save);
+    settingsSaveQueueRef.current = result.catch(() => false);
+    return result;
+  };
+
   return {
     loadProjects,
     loadProjectStatus,
@@ -279,9 +297,7 @@ const loadTokenStats = async (id, modelName = 'All Models') => {
     scheduleLoadChapters,
     ensureChapterInList,
     loadChapterDetails,
-    loadLivingDocs,
     loadSettings,
     saveSettings,
-    loadTokenStats,
   };
 }

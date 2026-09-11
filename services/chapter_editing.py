@@ -7,6 +7,7 @@ from models.novel import Chapter
 from services.novel_constants import DEFAULT_WORD_COUNT_PER_CHAPTER, PREVIOUS_CHAPTER_ENDING_CHARS
 from services.pipeline_transitions import set_chapter_pipeline_step
 from services.pipeline_types import ChapterStatus, PipelineStep
+from services.chapter_progress import assert_chapter_not_frozen
 from services.validator import validate_chapter
 
 
@@ -35,6 +36,7 @@ async def validate_and_apply_chapter_edit(
     title: str,
     content: str,
 ) -> dict:
+    assert_chapter_not_frozen(chapter)
     ending = await previous_chapter_ending(db, novel.id, chapter_index)
     validator_result = validate_chapter(
         content,

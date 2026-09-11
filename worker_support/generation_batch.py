@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from models.novel import Chapter, Job, Novel
 from services.chapter_progress import all_target_chapters_published, find_next_writable_chapter
 from services.job_payload import get_job_params, set_job_params
@@ -37,15 +35,6 @@ async def get_novel_for_job(db: AsyncSession, job: Job) -> Novel | None:
 def set_agent_chapter(agent_nodes: list, chapter_index: int) -> None:
     for agent in agent_nodes:
         agent.agent.current_chapter = chapter_index
-
-
-async def backup_project_after_chapter(novel_id) -> None:
-    try:
-        from services.backup import run_backup
-
-        await asyncio.get_event_loop().run_in_executor(None, run_backup, str(novel_id))
-    except Exception as exc:
-        print(f"[generate_job_runner WARNING] Backup failed: {exc}")
 
 
 def batch_size_from_params(job_params: dict) -> int:

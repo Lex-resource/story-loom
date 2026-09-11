@@ -25,6 +25,11 @@ from services.knowledge_types import ForeshadowingKnowledge
 from services.living_docs_parsers import parse_bullet_points, parse_character_state
 from services.vector_context_formatting import format_chapter_extracts
 
+
+import logging
+
+logger = logging.getLogger(__name__)
+
 QueryCollection = Callable[..., Awaitable[dict]]
 
 
@@ -47,7 +52,7 @@ async def retrieve_chapter_extracts(
         documents.extend(res.get("documents", [[]])[0] or [])
         metadatas.extend(res.get("metadatas", [[]])[0] or [])
     except Exception as e:
-        print(f"Error querying chapter_extract vectors: {e}")
+        logger.error(f"Error querying chapter_extract vectors: {e}")
 
     # Legacy rows written before source=chapter_extract.
     if len(documents) < 3:
@@ -67,7 +72,7 @@ async def retrieve_chapter_extracts(
                 documents.append(doc)
                 metadatas.append(meta or {})
         except Exception as e:
-            print(f"Error querying legacy chapter vectors: {e}")
+            logger.error(f"Error querying legacy chapter vectors: {e}")
 
     return format_chapter_extracts(documents, metadatas)
 
@@ -118,7 +123,7 @@ async def retrieve_setting_context(
                 if name in char_map and name not in matched_names:
                     matched_names.append(name)
     except Exception as e:
-        print(f"Error querying characters from vector store: {e}")
+        logger.error(f"Error querying characters from vector store: {e}")
 
     retrieved_characters = "\n\n".join([char_map[name] for name in matched_names])
     retrieved_world = await _retrieve_or_fallback(
@@ -245,7 +250,7 @@ async def _retrieve_or_fallback(
             limit=query_limit,
         )
     except Exception as e:
-        print(f"Error querying {error_label}: {e}")
+        logger.error(f"Error querying {error_label}: {e}")
 
     if retrieved.strip():
         return retrieved

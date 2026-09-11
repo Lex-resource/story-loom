@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agents.constants import NOVEL_FORMAT_LONG_WEBNOVEL, NOVEL_FORMAT_ZHIHU_SHORT
+from services.workflow_surface import is_short_form_workflow
 
 STORY_LENGTH_SHORT = "short"
 STORY_LENGTH_LONG = "long"
@@ -23,7 +24,8 @@ def normalize_creative_profile(
     word_count_per_chapter: int | None = None,
 ) -> dict[str, Any]:
     source = profile if isinstance(profile, dict) else {}
-    inferred_short = novel_format == NOVEL_FORMAT_ZHIHU_SHORT
+    # 按表面策略判断，于是克隆自短篇的自定义工作流也默认套短篇的节数/字数。
+    inferred_short = is_short_form_workflow(novel_format)
     story_length = source.get("story_length") or (
         STORY_LENGTH_SHORT if inferred_short else STORY_LENGTH_LONG
     )

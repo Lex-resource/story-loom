@@ -1,11 +1,10 @@
+import uuid
+
 from services.job_payload import get_blocking_job_error_message, get_job_params
-from fastapi import Depends, HTTPException
-from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_db
-from models.novel import Chapter, Job, Novel, PromptTemplate
+from models.novel import Chapter, Job, Novel, PipelineConfigModel
 from services.project_stats import sum_project_chars
 from agents.constants import NOVEL_FORMAT_LONG_WEBNOVEL, AGENT_PLANNER
 from services.novel_constants import (
@@ -20,43 +19,56 @@ from services.novel_constants import (
     NOVEL_TYPE_PROJECT,
 )
 from services.pipeline_types import JobStatus, NovelStatus
+from services import workflow_registry
 from services.creative_profile import normalize_creative_profile, workflow_format_for_profile
-from services.ids import parse_project_id
+from services.project_deletion import delete_project_data
 
+DEFAULT_JOB_HISTORY_PAGE_SIZE = 200
+MAX_JOB_HISTORY_PAGE_SIZE = 500
+async def get_formats(db: AsyncSession):
+    """可选的创作工作流列表。
 
-class CreateProjectRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-    author: str | None = Field(default=None, max_length=200)
-    novel_format: str | None = Field(default=None, max_length=100)
-    creative_profile: dict | None = None
-    target_chapters: int | None = Field(default=None, ge=1, le=10_000)
-    word_count_per_chapter: int | None = Field(default=None, ge=1, le=100_000)
-    optimize_interval: int = Field(default=DEFAULT_OPTIMIZE_INTERVAL, ge=1, le=10_000)
-    mode: str = Field(default=NOVEL_MODE_STEP, pattern=f"^({NOVEL_MODE_STEP}|{NOVEL_MODE_AUTO})$")
-    user_prompt: str | None = Field(default=None, max_length=100_000)
-    prompt: str | None = Field(default=None, max_length=100_000)
-    reference_style: str = Field(default="", max_length=100_000)
+    原实现是 `SELECT DISTINCT category FROM prompt_templates` —— 从提示词表**反推**
+    格式。于是新建的工作流不会出现（它可能复用别人的 category），而共享提示词的两个
+    工作流会被合并成一个。现在直接查 `pipeline_configs`，那才是工作流的权威来源。
 
-    @model_validator(mode="after")
-    def validate_required_text(self):
-        self.title = self.title.strip()
-        if not self.title:
-            raise ValueError("title must not be blank")
-        prompt = (self.user_prompt or self.prompt or "").strip()
-        if not prompt:
-            raise ValueError("user_prompt must not be blank")
-        self.user_prompt = prompt
-        return self
+    返回结构保持 `{"formats": [...]}` 以兼容既有前端，另外附一份带中文名与说明的
+    `workflows`，供「选工作流」的界面直接用。
+    """
+    result = await db.execute(
+        select(PipelineConfigModel).order_by(
+            PipelineConfigModel.builtin.desc(), PipelineConfigModel.name
+        )
+    )
+    rows = result.scalars().all()
 
-async def get_formats(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(PromptTemplate.category).where(PromptTemplate.category.isnot(None)).distinct())
-    formats = result.scalars().all()
-    # Provide a fallback default if table is empty
-    if not formats:
-        formats = [NOVEL_FORMAT_LONG_WEBNOVEL]
-    return {"formats": [f for f in formats if f]}
+    if not rows:
+        return {
+            "formats": [NOVEL_FORMAT_LONG_WEBNOVEL],
+            "workflows": [
+                {
+                    "name": NOVEL_FORMAT_LONG_WEBNOVEL,
+                    "name_zh": "长篇小说",
+                    "description": None,
+                    "builtin": True,
+                }
+            ],
+        }
 
-async def list_projects(db: AsyncSession = Depends(get_db)):
+    return {
+        "formats": [row.name for row in rows],
+        "workflows": [
+            {
+                "name": row.name,
+                "name_zh": row.name_zh or row.name,
+                "description": getattr(row, "description", None),
+                "builtin": bool(getattr(row, "builtin", False)),
+            }
+            for row in rows
+        ],
+    }
+
+async def list_projects(db: AsyncSession):
     # Single query with left join aggregates to avoid N+1 per-novel sub-queries.
     from sqlalchemy import func as sa_func
     chapter_count = sa_func.count(Chapter.id).label("chapter_count")
@@ -91,40 +103,73 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
     return ret
 
 
-async def create_project(data: CreateProjectRequest, db: AsyncSession = Depends(get_db)):
+async def _resolve_workflow(db: AsyncSession, requested: str | None) -> str | None:
+    """校验显式指定的工作流；没指定则返回 ``None`` 交给旧的按篇幅派生。
+
+    原实现无条件用 ``workflow_format_for_profile(creative_profile)`` 从「长篇/短篇」
+    二选一派生，于是**前端传什么 novel_format 都被丢掉** —— 工作流可自定义之后，
+    这会让「选了自定义工作流」变成一句空话：项目仍落在内置两行之一。
+
+    但名字必须是库里真实存在的工作流：``get_pipeline_config`` 查不到会抛
+    ``ValueError``，而它在 worker 的每章生成路径上 —— 让一个拼错的名字落进
+    ``Novel.novel_format``，等于建了一个永远跑不动的项目。
+    """
+    name = (requested or "").strip()
+    if not name:
+        return None
+
+    exists = (
+        await db.execute(
+            select(PipelineConfigModel.id).where(PipelineConfigModel.name == name)
+        )
+    ).scalar_one_or_none()
+    if exists is None:
+        raise ValueError(f"工作流 '{name}' 不存在，请在「系统配置」里先创建它。")
+    # 顺手预热缓存：normalize_creative_profile 紧接着就要问它是不是短篇表面，
+    # 而那是同步调用，拿不到 session。
+    await workflow_registry.refresh(db)
+    return name
+
+
+async def create_project(db: AsyncSession, data: dict):
     from models.novel import Job
 
-    payload = data.model_dump()
+    payload = dict(data)
 
+    requested_workflow = await _resolve_workflow(db, payload.get("novel_format"))
     creative_profile = normalize_creative_profile(
         payload.get("creative_profile"),
-        novel_format=payload.get("novel_format"),
+        novel_format=requested_workflow,
         target_chapters=payload.get("target_chapters"),
         word_count_per_chapter=payload.get("word_count_per_chapter"),
     )
-    novel_format = workflow_format_for_profile(creative_profile)
+    # 显式选了工作流就用它；没选则沿用旧行为，按篇幅在内置两行里二选一。
+    novel_format = requested_workflow or workflow_format_for_profile(creative_profile)
     novel = Novel(
-        title=data.title.strip(),
-        author=data.author,
+        title=str(data.get("title", "")).strip(),
+        author=data.get("author"),
         type=NOVEL_TYPE_PROJECT,
         novel_format=novel_format,
         creative_profile=creative_profile,
         target_chapters=creative_profile["target_chapters"],
         word_count_per_chapter=creative_profile["word_count_per_chapter"],
-        optimize_interval=data.optimize_interval,
-        mode=data.mode,
+        optimize_interval=data.get("optimize_interval", DEFAULT_OPTIMIZE_INTERVAL),
+        mode=data.get("mode", NOVEL_MODE_STEP),
         status=NovelStatus.GENERATING,
     )
     db.add(novel)
     await db.flush()
 
     job_params = {
-        "user_prompt": data.user_prompt,
-        "reference_style": data.reference_style,
+        "user_prompt": data.get("user_prompt") or data.get("prompt"),
+        "reference_style": data.get("reference_style", ""),
         "creative_profile": creative_profile,
         "bootstrap_skeleton": True,
     }
-    if data.mode == NOVEL_MODE_AUTO:
+    if data.get("experiment"):
+        experiment = data["experiment"]
+        job_params["experiment"] = experiment if isinstance(experiment, dict) else experiment.model_dump(exclude_none=True)
+    if data.get("mode") == NOVEL_MODE_AUTO:
         job_params["batch_size"] = creative_profile["target_chapters"]
 
     job = Job(
@@ -140,18 +185,26 @@ async def create_project(data: CreateProjectRequest, db: AsyncSession = Depends(
     return {"project_id": str(novel.id), "status": novel.status, "job_id": str(job.id)}
 
 
-async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Novel).where(Novel.id == parse_project_id(project_id)))
+async def delete_project(db: AsyncSession, pid: uuid.UUID):
+    result = await db.execute(select(Novel).where(Novel.id == pid))
     novel = result.scalar_one_or_none()
     if not novel:
-        raise HTTPException(status_code=404, detail="Project not found")
-    await db.delete(novel)
-    await db.commit()
-    return {"status": API_STATUS_DELETED}
+        raise LookupError("Project not found")
+    cleanup_errors = await delete_project_data(db, pid)
+    return {
+        "status": API_STATUS_DELETED,
+        "projection_cleanup_errors": cleanup_errors,
+    }
 
 
-async def get_status(project_id: str, db: AsyncSession = Depends(get_db)):
-    novel = await get_novel_or_404(db, project_id)
+async def active_project_job_ids_for_delete(db: AsyncSession, project_id: uuid.UUID) -> list[uuid.UUID]:
+    from services.project_deletion import active_project_job_ids
+
+    return await active_project_job_ids(db, project_id)
+
+
+async def get_status(db: AsyncSession, project_id: uuid.UUID):
+    novel = await get_novel_or_raise(db, project_id)
 
     job_result = await db.execute(
         select(Job).where(Job.project_id == novel.id).order_by(Job.created_at.desc()).limit(1)
@@ -191,18 +244,28 @@ async def get_status(project_id: str, db: AsyncSession = Depends(get_db)):
     }
 
 
-async def get_jobs(project_id: str, db: AsyncSession = Depends(get_db)):
+async def get_jobs(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    limit: int = DEFAULT_JOB_HISTORY_PAGE_SIZE,
+    offset: int = 0,
+):
     result = await db.execute(
-        select(Job).where(Job.project_id == parse_project_id(project_id)).order_by(Job.created_at.desc())
+        select(Job)
+        .where(Job.project_id == project_id)
+        .order_by(Job.created_at.desc(), Job.id.asc())
+        .limit(limit)
+        .offset(offset)
     )
     jobs = result.scalars().all()
     return [{"id": str(j.id), "type": j.type, "status": j.status, "current_step": j.current_step} for j in jobs]
 
 
-async def get_novel_or_404(db: AsyncSession, project_id: str) -> Novel:
-    """按 project_id 查询 Novel，不存在则抛 404。"""
-    result = await db.execute(select(Novel).where(Novel.id == parse_project_id(project_id)))
+async def get_novel_or_raise(db: AsyncSession, project_id: uuid.UUID) -> Novel:
+    """按 project_id 查询 Novel，不存在则抛 LookupError。"""
+    result = await db.execute(select(Novel).where(Novel.id == project_id))
     novel = result.scalar_one_or_none()
     if not novel:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise LookupError("Project not found")
     return novel

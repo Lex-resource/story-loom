@@ -158,6 +158,22 @@ def get_job_params(job) -> dict[str, Any]:
     return {}
 
 
+def find_experiment_params(jobs) -> Optional[dict[str, Any]]:
+    """Return the newest valid experiment payload found in ``jobs``.
+
+    Rewrite and resume flows can create intermediate jobs whose params only
+    contain UI or chapter-control fields.  Research metadata must therefore
+    be recovered from the newest job that still carries it, rather than being
+    lost when the latest job is rewritten.
+    """
+    for job in jobs or []:
+        params = get_job_params(job)
+        experiment = params.get("experiment")
+        if isinstance(experiment, dict):
+            return dict(experiment)
+    return None
+
+
 def set_job_params(job, params: dict[str, Any]) -> None:
     job.params = dict(params)
 

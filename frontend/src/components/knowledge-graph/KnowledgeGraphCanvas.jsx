@@ -15,13 +15,7 @@ export default function KnowledgeGraphCanvas({
   const [container, setContainer] = useState(null);
   const setRef = useCallback((node) => setContainer(node), []);
 
-  const { fit, zoomIn, zoomOut } = useVisNetwork(
-    container,
-    data,
-    options,
-    onNodeClick,
-    { freezeAfterStabilization },
-  );
+  const { fit, zoomIn, zoomOut } = useVisNetwork(container, data, options, onNodeClick, { freezeAfterStabilization });
 
   return (
     <div className="kg-canvas-wrapper">
@@ -33,9 +27,15 @@ export default function KnowledgeGraphCanvas({
           </div>
         )}
         <div className="kg-zoom-controls">
-          <button type="button" className="kg-zoom-btn" onClick={zoomIn} title="放大">+</button>
-          <button type="button" className="kg-zoom-btn" onClick={zoomOut} title="缩小">−</button>
-          <button type="button" className="kg-zoom-btn" onClick={fit} title="适应画布">⊡</button>
+          <button type="button" className="kg-zoom-btn" onClick={zoomIn} title="放大">
+            +
+          </button>
+          <button type="button" className="kg-zoom-btn" onClick={zoomOut} title="缩小">
+            −
+          </button>
+          <button type="button" className="kg-zoom-btn" onClick={fit} title="适应画布">
+            ⊡
+          </button>
         </div>
         {controls}
       </div>

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -7,20 +6,18 @@ from sqlalchemy import select
 
 from agents.base import LLMJSONParsingError
 from database import async_session
-from models.novel import Chapter
+from models.novel import Chapter, Job
 from services.novel_constants import (
     REVIEW_FLAG_SEVERITY_WARNING,
     REVIEW_FLAG_TYPE_FORCE_CORRECTED,
 )
 from services.pipeline_transitions import set_chapter_pipeline_step
 from services.pipeline_transitions import publish_chapter_state
-from services.pipeline_types import ChapterStatus, PipelineStep
+from services.pipeline_types import ChapterStatus, JobStatus, PipelineStep
+from services.novel_constants import JOB_TYPE_POST_PROCESSING
 from services.project_stats import chapter_chars_from_row, sum_project_chars
 
 logger = logging.getLogger(__name__)
-
-
-_bg_tasks: set = set()
 
 
 def mark_chapter_force_published(chapter) -> None:
@@ -105,8 +102,30 @@ async def run_post_processing_background(project_id: uuid.UUID, chapter_index: i
         logger.exception("chapter_post_processing_failed project_id=%s chapter_index=%s", project_id, chapter_index)
 
 
-def schedule_post_processing(project_id: uuid.UUID, chapter_index: int):
-    task = asyncio.create_task(run_post_processing_background(project_id, chapter_index))
-    _bg_tasks.add(task)
-    task.add_done_callback(_bg_tasks.discard)
-    return task
+async def enqueue_post_processing_job(
+    db,
+    project_id: uuid.UUID,
+    chapter_index: int,
+) -> Job:
+    """Create the durable job used by manual chapter publication."""
+    existing = (await db.execute(
+        select(Job).where(
+            Job.project_id == project_id,
+            Job.type == JOB_TYPE_POST_PROCESSING,
+            Job.current_chapter == chapter_index,
+            Job.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
+        ).order_by(Job.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    job = Job(
+        project_id=project_id,
+        type=JOB_TYPE_POST_PROCESSING,
+        status=JobStatus.PENDING,
+        current_step="extractor",
+        current_chapter=chapter_index,
+        params={"run_extractor": True},
+    )
+    db.add(job)
+    await db.flush()
+    return job

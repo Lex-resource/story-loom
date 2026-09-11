@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from agents.constants import NOVEL_FORMAT_ZHIHU_SHORT
 from agents.writing.validator_agent import ValidatorAgent
 from models.novel import Chapter
 from services.novel_constants import SHORT_MANUSCRIPT_CONTEXT_MAX_CHARS
 from services.short_story_context import build_short_manuscript_context
+from services.workflow_surface import is_short_form_workflow
 
 
 def should_review_completed_short_story(novel, chapter_index: int) -> bool:
+    # 按表面策略而不是格式名判断：从短篇克隆出来的自定义工作流也要做完结全文审校，
+    # 否则它拿到短篇提示词却永远不做终局审校 —— 静默地少一道质量闸门。
     return bool(
-        novel.novel_format == NOVEL_FORMAT_ZHIHU_SHORT
+        is_short_form_workflow(novel.novel_format)
         and novel.target_chapters
         and chapter_index >= novel.target_chapters
     )
@@ -53,6 +55,7 @@ async def review_completed_short_story(db, novel, chapter_index: int) -> dict | 
         title=novel.title,
         outline=novel.outline or {},
         manuscript=manuscript,
+        category=novel.novel_format,
     )
     append_full_story_review_flag(chapters[-1], report)
     await db.commit()

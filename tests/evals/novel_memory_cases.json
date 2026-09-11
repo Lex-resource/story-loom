@@ -1,0 +1,26 @@
+[
+  {
+    "id": "character-state-transition",
+    "chapter": 12,
+    "scope": "main",
+    "expected": ["character_state", "valid_from_chapter"]
+  },
+  {
+    "id": "foreshadowing-due",
+    "chapter": 30,
+    "scope": "main",
+    "expected": ["foreshadowing", "valid_to_chapter"]
+  },
+  {
+    "id": "branch-isolation",
+    "chapter": 3,
+    "scope": "character_branch",
+    "expected": ["branch_id", "storyline_id"]
+  },
+  {
+    "id": "manual-authority",
+    "chapter": 18,
+    "scope": "main",
+    "expected": ["authority", "status"]
+  }
+]

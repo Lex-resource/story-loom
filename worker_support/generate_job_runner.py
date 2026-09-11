@@ -9,17 +9,22 @@ orchestrator.check_paused 抛出，由单章/批量流程捕获处理。
 """
 from __future__ import annotations
 
-import uuid
+import asyncio
+
+from services.settings_store import load_settings
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.constants import (
     AGENT_EDITOR,
+    AGENT_EXTRACTOR,
+    AGENT_PLANNER,
     AGENT_VALIDATOR,
     AGENT_WRITER,
 )
 from models.novel import (
     Job,
 )
+from services.chapter_graph import ChapterGraph, default_graph
 from services.job_payload import (
     get_job_params,
 )
@@ -28,42 +33,34 @@ from services.pipeline_transitions import (
     set_job_step,
 )
 from services.pipeline_types import ChapterStatus
-from worker_support.generation_context import (
-    append_user_intervention,
-    rewrite_instructions_for_writer,
+from worker_support import chapter_steps as steps
+from worker_support.chapter_graph_runner import (
+    OUTCOME_PAUSE,
+    OUTCOME_RETRY,
+    run_chapter_graph,
 )
 from worker_support.chapter_repository import (
     get_chapter_by_index,
     prepare_chapter_for_step,
 )
+from worker_support.chapter_run_state import ChapterRunState
 from worker_support.events import GenerationEvents
 from worker_support.generation_exceptions import JobAbortedException, JobPausedException
-from worker_support.generation_nodes import editor, planner, validator_agent, writer
-from worker_support.generation_outline import prepare_chapter_outline
-from worker_support.generation_postprocess import run_chapter_post_processing
-from worker_support.generation_editor_policy import mark_editor_rewrite
 from worker_support.generation_start_policy import (
     initial_generation_loop_state,
     resolve_generation_start_state,
+    should_resume_extractor,
 )
-from worker_support.generation_validator_policy import finalize_validated_chapter
 from worker_support.pipeline_runtime import load_generation_pipeline_runtime
 from worker_support.generation_planner_flow import prepare_planner_inputs
-from worker_support.generation_validation_flow import (
-    run_final_validator_flow,
-    run_pre_editor_validation,
-    run_saved_chapter_comprehensive_validation,
-)
-from worker_support.generation_writer_flow import (
-    load_writer_context,
-    run_writer_draft,
-    save_writer_draft,
-)
-from worker_support.generation_editor_flow import (
-    run_editor_review,
-    run_force_editor_revision,
-    run_post_edit_validation,
-    run_style_repair,
+from services.experiment_recorder import (
+    activate,
+    context_from_job,
+    code_snapshot,
+    adeactivate,
+    arecord_run_manifest,
+    provider_snapshot,
+    record_chapter_finished,
 )
 
 
@@ -71,15 +68,26 @@ from worker_support.generation_editor_flow import (
 # Single chapter pipeline
 # ---------------------------------------------------------------------------
 
-async def process_single_chapter(
-    db: AsyncSession, job: Job, novel, next_chapter: int, attempt: int = 1
+async def _process_single_chapter(
+    db: AsyncSession,
+    job: Job,
+    novel,
+    next_chapter: int,
+    attempt: int = 1,
+    *,
+    experiment=None,
 ):
-    """Run planner -> writer -> editor -> validator -> extractor for one chapter.
+    """跑完一章：planner -> writer -> editor -> validator -> extractor。
 
-    Raises JobPausedException / JobAbortedException if status changed mid-run
-    (via check_paused checks scattered throughout).
+    编排在这里，每一步做什么在 ``worker_support/chapter_steps.py``。本函数只做三件事：
+    算出 resume 入口、按顺序调适配器、根据裁决决定下一步（回边 / 暂停 / 递归 / 发布）。
+
+    状态跨阶段传递走 ``ChapterRunState``（黑板），不再用 30 个局部变量。
+
+    状态中途被改成 paused/cancelled 时，散布各处的 check_paused 会抛
+    JobPausedException / JobAbortedException。
     """
-    # Lazy import to avoid orchestrator <-> generate_job_runner circular import.
+    # orchestrator <-> generate_job_runner 相互导入，只能函数内 lazy import。
     from worker_support.orchestrator import check_paused
 
     runtime = await load_generation_pipeline_runtime(db, novel.novel_format)
@@ -89,7 +97,7 @@ async def process_single_chapter(
 
     chapter = await get_chapter_by_index(db, novel.id, next_chapter)
     if chapter and chapter.status == ChapterStatus.PENDING_REVIEW:
-        job.current_step = chapter.pipeline_step or job.current_step or "extractor"
+        job.current_step = chapter.pipeline_step or job.current_step or AGENT_EXTRACTOR
         StateMachine.pause_job(job, novel=novel)
         await db.commit()
         return
@@ -103,355 +111,241 @@ async def process_single_chapter(
     start_step = start_state.start_step
     set_job_step(job, start_step, chapter, allow_resume=True)
 
-    use_existing_outline = start_state.use_existing_outline
-    custom_prompt = start_state.custom_prompt
-
     chapter = await prepare_chapter_for_step(db, chapter, novel.id, next_chapter, start_step)
 
     await db.commit()
     project_id_str = str(novel.id)
     events = GenerationEvents(project_id_str)
 
-    async def planner_cb(channel: str, chunk: str):
-        if channel != "llm":
-            return
-        await events.chunk("planner", next_chapter, chunk)
+    state = ChapterRunState(
+        db=db,
+        job=job,
+        novel=novel,
+        chapter_index=next_chapter,
+        attempt=attempt,
+        runtime=runtime,
+        events=events,
+        project_id=project_id_str,
+        start_step=start_step,
+        use_existing_outline=start_state.use_existing_outline,
+        custom_prompt=start_state.custom_prompt,
+        prompt_category=getattr(runtime, "prompt_category", None),
+        chapter=chapter,
+    )
+    _bind_stream_callbacks(state)
 
-    async def writer_cb(channel: str, chunk: str):
-        if channel != "llm":
-            return
-        await events.chunk("writer", next_chapter, chunk)
+    if should_resume_extractor(start_step, chapter):
+        # 失败或被中断的 extractor：正文早已写完并校验过，重跑 Writer 会改动有效正文。
+        await check_paused(db, job.id)
+        set_job_step(job, AGENT_EXTRACTOR, chapter, allow_resume=True)
+        await db.commit()
+        await steps.run_postprocess(state)
+        return
 
-    async def editor_cb(channel: str, chunk: str):
-        if channel != "llm":
-            return
-        await events.chunk("editor", next_chapter, chunk)
-
-    async def validator_cb(phase: str, text: str):
-        if phase != "llm":
-            return
-        await events.chunk("validator", next_chapter, text, phase=phase)
-
-    skeleton = novel.outline or {}
+    state.skeleton = novel.outline or {}
 
     await check_paused(db, job.id)
 
-    planner_inputs = await prepare_planner_inputs(db, novel, next_chapter, custom_prompt)
-    mem_context = planner_inputs.memory
-    custom_prompt = planner_inputs.custom_prompt
-    succeeding_beginning = planner_inputs.succeeding_beginning
-    issue_summaries = planner_inputs.issue_summaries
+    # 记忆与议题摘要是所有阶段的共同输入，与图里有没有 planner 步骤无关 —— 无条件加载。
+    planner_inputs = await prepare_planner_inputs(db, novel, next_chapter, state.custom_prompt)
+    state.memory = planner_inputs.memory
+    state.custom_prompt = planner_inputs.custom_prompt
+    state.succeeding_beginning = planner_inputs.succeeding_beginning
+    state.issue_summaries = planner_inputs.issue_summaries
+    state.planner_previous_ending = planner_inputs.previous_ending
 
-    outline_data = await prepare_chapter_outline(
-        db,
-        novel=novel,
-        chapter_index=next_chapter,
-        use_existing_outline=use_existing_outline,
-        mem_context=mem_context,
-        skeleton=skeleton,
-        issue_summaries=issue_summaries,
-        planner_node=planner,
-        planner_cb=planner_cb,
-        planner_previous_ending=planner_inputs.previous_ending,
-        project_id=project_id_str,
-        events=events,
-    )
-
-    if not outline_data or not outline_data.get("summary"):
-        await events.error(f"第 {next_chapter} 章大纲为空或生成失败，已暂停生成，请手动补充。")
-        # Keep current_step = "planner" so resume re-runs the planner.
-        job.current_step = "planner"
-        StateMachine.pause_job(job)
-        await db.commit()
-        return
-
-    # Auto-approve the outline and transition to writer
-    if start_step == "planner":
-        set_job_step(job, "writer", chapter)
-        await db.commit()
-
+    # 循环状态必须在进图之前算好：图入口边的预算守卫读的就是 rewrite_count /
+    # max_rewrites —— `skip_write_edit` 把 rewrite_count 顶到上限，于是 plan 的
+    # 默认后继落到 on_exhausted，整个 write-edit 簇被跳过。
     loop_state = initial_generation_loop_state(
         chapter,
         start_step,
         max_rewrites=runtime.max_rewrites,
     )
-    draft_content = loop_state.draft_content
-    edited_content = loop_state.edited_content
-    rewrite_count = loop_state.rewrite_count
-    max_rewrites = loop_state.max_rewrites
-    decision = loop_state.decision
-    validation_errors_str = loop_state.validation_errors
-    latest_validator_result = loop_state.latest_validator_result
-    raw_issues = loop_state.raw_issues
+    state.draft_content = loop_state.draft_content
+    state.edited_content = loop_state.edited_content
+    state.rewrite_count = loop_state.rewrite_count
+    state.max_rewrites = loop_state.max_rewrites
+    state.decision = loop_state.decision
+    state.validation_errors = loop_state.validation_errors
+    state.latest_validator_result = loop_state.latest_validator_result
+    state.raw_issues = loop_state.raw_issues
+    state.skip_write_edit = loop_state.skip_write_edit
 
-    if not loop_state.skip_write_edit:
-        await check_paused(db, job.id)
-        if start_step == "editor" and draft_content and runtime.has_editor:
-            set_job_step(job, "editor", chapter, allow_resume=True)
-        else:
-            set_job_step(job, "writer", chapter, allow_resume=True)
-        await db.commit()
+    outcome = await run_chapter_graph(state, _graph_for_runtime(runtime))
 
-    while rewrite_count < max_rewrites:
-        writer_context = await load_writer_context(db, novel, next_chapter, outline_data)
-        mem_context = writer_context.memory
-        pipeline_context = writer_context.pipeline
-
-        if decision == "rewrite":
-            custom_prompt = append_user_intervention(custom_prompt, pipeline_context.intervention)
-
-            prev_ch = await get_chapter_by_index(db, novel.id, next_chapter)
-            rewrite_instructions = rewrite_instructions_for_writer(
-                custom_prompt,
-                prev_ch.error if prev_ch else None,
-                succeeding_beginning,
-                next_chapter,
-            )
-
-            await check_paused(db, job.id)
-            set_job_step(job, "writer", chapter, allow_resume=True)
-            await db.commit()
-            await events.status(
-                AGENT_WRITER,
-                next_chapter,
-                (
-                    f"作家智能体正在创作初稿... (第 {rewrite_count + 1} 次尝试)"
-                    if rewrite_count > 0 else "作家智能体正在创作初稿..."
-                ),
-            )
-
-            draft_content = await run_writer_draft(
-                db,
-                novel,
-                next_chapter,
-                writer,
-                pipeline_context,
-                outline_data,
-                skeleton,
-                issue_summaries,
-                rewrite_instructions,
-                on_chunk=writer_cb,
-            )
-            edited_content = None
-            chapter = await save_writer_draft(db, novel, next_chapter, draft_content)
-
-        if runtime.validation_before_editor:
-            pre_editor_validation = await run_pre_editor_validation(
-                db,
-                novel,
-                next_chapter,
-                outline_data.get("title", f"第{next_chapter}章"),
-                draft_content,
-                edited_content,
-                pipeline_context.previous_ending,
-                mem_context,
-                chapter,
-                validator_agent,
-                events,
-                has_editor=runtime.has_editor,
-                on_validator_chunk=validator_cb,
-            )
-            latest_validator_result = pre_editor_validation["validator_result"]
-            draft_content = pre_editor_validation["draft_content"]
-            edited_content = pre_editor_validation["edited_content"]
-            validation_errors_str = pre_editor_validation["validation_errors"]
-        else:
-            latest_validator_result = None
-            validation_errors_str = ""
-
-        if not runtime.has_editor:
-            break
-
-        await check_paused(db, job.id)
-        set_job_step(job, "editor", chapter)
-        await db.commit()
-        await events.status(AGENT_EDITOR, next_chapter, "编辑智能体正在审阅及润色文稿...")
-        editor_review = await run_editor_review(
-            db,
-            novel,
-            next_chapter,
-            editor,
-            pipeline_context,
-            draft_content,
-            outline_data,
-            issue_summaries,
-            validation_errors_str,
-            rewrite_count,
-            on_chunk=editor_cb,
-        )
-        chapter = editor_review.chapter
-        editor_result = editor_review.editor_result
-        eval_data = editor_review.evaluations
-        decision = editor_review.decision
-        edited_content = editor_review.edited_content
-        raw_issues = editor_review.raw_issues
-
-        if decision == "rewrite":
-            rewrite_count += 1
-            mark_editor_rewrite(
-                chapter,
-                rewrite_count,
-                editor_result.get("rewrite_reason", ""),
-                editor_result.get("rewrite_instructions", ""),
-            )
-            await db.commit()
-
-            if (not runtime.enable_editor_loop) or rewrite_count >= max_rewrites:
-                if not runtime.enable_force_correction:
-                    await events.status(
-                        AGENT_EDITOR,
-                        next_chapter,
-                        "编辑器要求重写，但当前流程未启用自动重写/强制修正，已暂停等待人工处理。",
-                    )
-                    job.current_step = "editor"
-                    StateMachine.pause_job(job)
-                    await db.commit()
-                    return
-
-                await events.status(
-                    AGENT_EDITOR,
-                    next_chapter,
-                    f"重写次数已达上限（{max_rewrites}次），正在启动编辑智能体进行强制修正和润色...",
-                )
-                editor_review = await run_force_editor_revision(
-                    db,
-                    novel,
-                    next_chapter,
-                    chapter,
-                    editor,
-                    draft_content,
-                    outline_data,
-                    mem_context,
-                    issue_summaries,
-                    editor_result.get("rewrite_reason", ""),
-                    validation_errors_str,
-                    eval_data,
-                    on_chunk=editor_cb,
-                )
-                decision = editor_review.decision
-                edited_content = editor_review.edited_content
-                raw_issues = editor_review.raw_issues
-                # The forced revision is new content and must receive a fresh
-                # comprehensive validation before it can be published.
-                latest_validator_result = None
-                await db.commit()
-                break
-            continue
-
-        post_edit_validation = await run_post_edit_validation(
-            db,
-            novel,
-            next_chapter,
-            chapter,
-            outline_data,
-            mem_context,
-            draft_content,
-            edited_content,
-            rewrite_count,
-            max_rewrites,
-            raw_issues,
-            events,
-            validator_agent,
-            on_validator_chunk=validator_cb,
-        )
-        latest_validator_result = post_edit_validation.validator_result
-        draft_content = post_edit_validation.draft_content
-        edited_content = post_edit_validation.edited_content
-        rewrite_count = post_edit_validation.rewrite_count
-        decision = post_edit_validation.decision
-        validation_errors_str = post_edit_validation.validation_errors
-        if post_edit_validation.should_continue:
-            continue
-        break
-
-    if runtime.has_editor and chapter is not None:
-        style_repair = await run_style_repair(
-            db,
-            novel,
-            next_chapter,
-            chapter,
-            editor,
-            draft_content,
-            edited_content,
-            outline_data,
-            mem_context,
-            issue_summaries,
-            events,
-            on_chunk=editor_cb,
-        )
-        if style_repair.ran:
-            edited_content = style_repair.edited_content
-            # Destyled prose is new content; force a fresh comprehensive
-            # validation before it can be published.
-            latest_validator_result = None
-
-    run_validator = True
-    if start_step == "extractor" and chapter and chapter.status in ["validated", "post_processing"]:
-        run_validator = False
-        validator_result = chapter.validator_result or {"passed": True}
-
-    if run_validator:
-        await check_paused(db, job.id)
-        set_job_step(job, "validator", chapter, allow_resume=True)
-        await db.commit()
-
-        await events.status(AGENT_VALIDATOR, next_chapter, "正在进行内容规则校验与字数统计...")
-        chapter = await get_chapter_by_index(db, novel.id, next_chapter)
-
-        if latest_validator_result is not None:
-            validator_result = latest_validator_result
-        else:
-            validator_result = await run_saved_chapter_comprehensive_validation(
-                db,
-                novel,
-                chapter,
-                next_chapter,
-                validator_agent,
-                on_validator_chunk=validator_cb,
-            )
-
-    validator_result = await run_final_validator_flow(
-        db,
-        novel,
-        chapter,
-        next_chapter,
-        attempt,
-        validator_result,
-        validator_agent,
-        events,
-        on_validator_chunk=validator_cb,
-    )
-
-    if not validator_result.get("passed") and attempt < 3:
-        await check_paused(db, job.id)
-        job.current_step = "writer"
-        await db.commit()
-        return await process_single_chapter(db, job, novel, next_chapter, attempt + 1)
-
-    finalize_validated_chapter(chapter, validator_result)
-    await db.commit()
-
-    if validator_result.get("auto_force_saved"):
-        await events.status(
-            AGENT_VALIDATOR,
-            next_chapter,
-            "本章经过多轮重写后仍需强制保存，已暂停等待人工复核。",
-        )
-        job.current_step = "validator"
+    if outcome.kind == OUTCOME_PAUSE:
+        job.current_step = outcome.anchor
         StateMachine.pause_job(job)
         await db.commit()
         return
 
-    await run_chapter_post_processing(
-        db,
-        job,
-        novel,
-        chapter,
-        next_chapter,
-        has_extractor=runtime.has_extractor,
-        enable_living_docs_update=runtime.enable_living_docs_update,
-        check_paused=check_paused,
-        events=events,
+    if outcome.kind == OUTCOME_RETRY:
+        # 整章重跑。锚点设为 writer，于是恢复时复用大纲而不重烧一遍 planner。
+        await check_paused(db, job.id)
+        job.current_step = AGENT_WRITER
+        await db.commit()
+        return await process_single_chapter(
+            db,
+            job,
+            novel,
+            next_chapter,
+            attempt + 1,
+            _experiment=experiment,
+        )
+
+
+def _graph_for_runtime(runtime) -> ChapterGraph:
+    """本次生成生效的拓扑图。
+
+    工作流的 `graph` 列有内容时 `pipeline_runtime` 已经解析好挂在 runtime 上；为空时
+    按 runtime 的开关构造默认图 —— 与改造前那段硬编码的 `while` + `if/elif` 等价，
+    由 `tests/worker_support/test_generation_trace.py` 的 20 条序列逐项证明。
+    """
+    graph = getattr(runtime, "graph", None)
+    if graph is not None:
+        return graph
+    return default_graph(
+        has_editor=bool(runtime.has_editor),
+        has_style_repair=bool(getattr(runtime, "has_style_repair", runtime.has_editor)),
+        validation_before_editor=bool(runtime.validation_before_editor),
     )
-    from services.pipeline_commands import clear_intervention_prompt
-    await clear_intervention_prompt(db, job)
+
+
+def _bind_stream_callbacks(state: ChapterRunState) -> None:
+    """把四个 agent 的流式回调绑到黑板上。
+
+    每个回调只转发自己频道的 chunk —— 否则前端会把 Writer 的正文流塞进 Editor 面板。
+    """
+    events = state.events
+    chapter_index = state.chapter_index
+
+    async def planner_cb(channel: str, chunk: str):
+        if channel != "llm":
+            return
+        await events.chunk(AGENT_PLANNER, chapter_index, chunk)
+
+    async def writer_cb(channel: str, chunk: str):
+        if channel != "llm":
+            return
+        await events.chunk(AGENT_WRITER, chapter_index, chunk)
+
+    async def editor_cb(channel: str, chunk: str):
+        if channel != "llm":
+            return
+        await events.chunk(AGENT_EDITOR, chapter_index, chunk)
+
+    async def validator_cb(phase: str, text: str):
+        if phase != "llm":
+            return
+        await events.chunk(AGENT_VALIDATOR, chapter_index, text, phase=phase)
+
+    state.planner_cb = planner_cb
+    state.writer_cb = writer_cb
+    state.editor_cb = editor_cb
+    state.validator_cb = validator_cb
+
+
+async def process_single_chapter(
+    db: AsyncSession,
+    job: Job,
+    novel,
+    next_chapter: int,
+    attempt: int = 1,
+    *,
+    _experiment=None,
+):
+    """Run a chapter with one recorder context across in-job retries.
+
+    A Validator retry is part of the same chapter attempt, not a new chapter
+    segment. Reusing the context keeps elapsed time, tokens, and retry counts
+    cumulative and prevents recursive attempts from writing duplicate
+    ``chapter_finished`` events. A resumed Job still creates a new context, so
+    the publication reconciler can preserve genuine cross-Job segments.
+    """
+    is_root_attempt = _experiment is None
+    experiment = _experiment or context_from_job(job, novel.id, next_chapter)
+    token = activate(experiment) if is_root_attempt else None
+    completed = False
+    try:
+        if experiment and is_root_attempt:
+            app_settings = await load_settings()
+            active_id = app_settings.get("active_provider_id")
+            active_provider = next(
+                (
+                    provider
+                    for provider in app_settings.get("providers", [])
+                    if provider.get("id") == active_id
+                ),
+                None,
+            )
+            await arecord_run_manifest(
+                {
+                    "provider": provider_snapshot(active_provider),
+                    # git diff --binary 可能扫描几万文件的仓库，同步跑会冻结事件循环
+                    "code": await asyncio.to_thread(code_snapshot),
+                    "backup_provider_id": app_settings.get("backup_provider_id"),
+                    "attempt": attempt,
+                }
+            )
+        result = await _process_single_chapter(
+            db,
+            job,
+            novel,
+            next_chapter,
+            attempt,
+            experiment=experiment,
+        )
+        completed = True
+        if experiment and is_root_attempt:
+            job_status = str(getattr(job, "status", "") or "")
+            novel_status = str(getattr(novel, "status", "") or "")
+            status = "completed"
+            if job_status in {"paused", "failed", "cancelled"} or novel_status == "paused":
+                status = job_status or novel_status
+            record_chapter_finished(
+                status=status,
+                rewrite_count=experiment.content_retry_count,
+                extra={
+                    "pipeline_attempt": attempt,
+                    "job_status": job_status,
+                    "novel_status": novel_status,
+                },
+            )
+        return result
+    except JobPausedException:
+        if experiment and is_root_attempt:
+            record_chapter_finished(
+                status="paused",
+                rewrite_count=experiment.content_retry_count,
+                extra={"pipeline_attempt": attempt},
+            )
+        raise
+    except JobAbortedException:
+        if experiment and is_root_attempt:
+            record_chapter_finished(
+                status="aborted",
+                rewrite_count=experiment.content_retry_count,
+                extra={"pipeline_attempt": attempt},
+            )
+        raise
+    except Exception:
+        if experiment and is_root_attempt:
+            record_chapter_finished(
+                status="error",
+                rewrite_count=experiment.content_retry_count,
+                extra={"pipeline_attempt": attempt},
+            )
+        raise
+    finally:
+        if experiment and is_root_attempt and not experiment.chapter_finished_recorded:
+            record_chapter_finished(
+                status="completed" if completed else "error",
+                rewrite_count=experiment.content_retry_count,
+                extra={
+                    "pipeline_attempt": attempt,
+                    "recording_fallback": True,
+                },
+            )
+        if token is not None:
+            await adeactivate(token)

@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Any, Optional
 from config import settings
 
@@ -22,16 +23,31 @@ from agents.prompt_utils import (
 )
 from agents.llm_json import LLMJSONParsingError, parse_llm_json_response
 from agents.prompt_templates import invalidate_prompt_cache, load_prompt_template
+from services.prompt_scope import resolve as resolve_prompt_ref
+from services.runtime_tunables_service import get_value_sync
 from agents.providers import resolve_active_provider, resolve_backup_provider
 from agents.retry_policy import compute_retry_delay
 from agents.usage import record_agent_usage, record_backup_model_flag
+from services.experiment_recorder import (
+    record_json_recovery,
+    record_llm_attempt,
+    record_prompt_template,
+)
+
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AgentBase:
     def __init__(self, model: Optional[str] = None):
         self.model = model
-        self.timeout = settings.LLM_TIMEOUT
-        self.max_retries = settings.MAX_LLM_RETRIES
+        # LLM 超时/重试入库(runtime_tunables)。构造是同步的,读进程内快照;
+        # 快照由 worker 轮询循环的异步读点驱动刷新 —— 前端改完,下一章
+        # 新建的 agent 即生效。
+        self.timeout = get_value_sync("llm_timeout_seconds")
+        self.max_retries = get_value_sync("llm_max_retries")
         self._transport = OpenAICompatibleTransport(
             timeout=self.timeout,
             debug_enabled=settings.DEBUG,
@@ -48,7 +64,17 @@ class AgentBase:
         *,
         category: str
     ) -> tuple[str, str]:
+        # 工作流的提示词覆盖在这里生效，且**只在这里** —— 20 个调用点写死的提示词名
+        # 与 novel_format 都不用改。作用域为空时原样返回（长篇路径不变）。
+        # 解析放在加载之前，于是缓存键、实验记录和 UI 上显示的名字都是实际用的那一份。
+        name, category = resolve_prompt_ref(name, category)
         template = await load_prompt_template(name, category=category)
+        record_prompt_template(
+            name=name,
+            category=category,
+            system_prompt=template[0],
+            user_prompt_template=template[1],
+        )
         self.active_prompt_name = f"{name} ({category})"
         return template
 
@@ -80,7 +106,11 @@ class AgentBase:
         instance).
         """
         from services.token_count import count_tokens
-        start_time = reset_call_metrics(self, system_prompt, user_prompt, count_tokens)
+        # tokenizer 首次加载是数秒级磁盘 IO，encode 大 prompt 也是 CPU 密集，
+        # 都不能在事件循环里同步跑。
+        start_time = await asyncio.to_thread(
+            reset_call_metrics, self, system_prompt, user_prompt, count_tokens
+        )
 
         effective_max_retries = _max_retries if _max_retries is not None else self.max_retries
 
@@ -105,7 +135,8 @@ class AgentBase:
         for attempt in range(effective_max_retries * 2):
             if attempt >= effective_max_retries and not using_backup:
                 switched, current_base_url, current_api_key, current_model = await self._switch_to_backup_provider(
-                    app_settings, current_base_url, current_api_key, current_model
+                    app_settings, current_base_url, current_api_key, current_model,
+                    failure_reason=str(last_exception) if last_exception else None,
                 )
                 if not switched:
                     # No backup provider configured (or backup also failed).
@@ -144,23 +175,61 @@ class AgentBase:
                         on_chunk=on_chunk,
                     )
                 )
-                self._apply_api_usage(result.usage, result.content, count_tokens)
+                # usage 缺失时会同步 encode 整个响应文本，下放线程池
+                await asyncio.to_thread(
+                    self._apply_api_usage, result.usage, result.content, count_tokens
+                )
+                self.last_model_name = current_model
                 self._finalize_call(current_model, result.content, start_time, is_stream=result.is_stream)
+                record_llm_attempt(
+                    agent_name=getattr(self, "agent_name", self.__class__.__name__),
+                    prompt_name=getattr(self, "active_prompt_name", "Unknown"),
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    provider_name=("backup" if using_backup else active_provider.provider_name),
+                    model=current_model,
+                    base_url=current_base_url,
+                    attempt=attempt,
+                    is_fallback=using_backup,
+                    response=result.content,
+                    duration_ms=int(getattr(self, "last_duration", 0.0) * 1000),
+                    input_tokens=getattr(self, "last_input_tokens", None),
+                    output_tokens=getattr(self, "last_output_tokens", None),
+                    memory_context_chars=getattr(self, "last_memory_context_chars", None),
+                    memory_context_breakdown=getattr(self, "last_memory_context_breakdown", None),
+                )
                 return result.content
             except Exception as e:
                 # Remember the last error so we can re-raise it if the loop
                 # falls through via the "no backup provider" branch above.
                 last_exception = e
+                record_llm_attempt(
+                    agent_name=getattr(self, "agent_name", self.__class__.__name__),
+                    prompt_name=getattr(self, "active_prompt_name", "Unknown"),
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    provider_name=("backup" if using_backup else active_provider.provider_name),
+                    model=current_model,
+                    base_url=current_base_url,
+                    attempt=attempt,
+                    is_fallback=using_backup,
+                    error=str(e),
+                    duration_ms=int((time.time() - start_time) * 1000),
+                    input_tokens=getattr(self, "last_input_tokens", None),
+                    output_tokens=getattr(self, "last_output_tokens", None),
+                    memory_context_chars=getattr(self, "last_memory_context_chars", None),
+                    memory_context_breakdown=getattr(self, "last_memory_context_breakdown", None),
+                )
                 # If we fail and it's not corrected /v1 yet:
                 if current_base_url == initial_base_url and not current_base_url.endswith("/v1") and not current_base_url.endswith("/v1/"):
                     current_base_url = current_base_url.rstrip("/") + "/v1"
-                    print(f"[AgentBase] API call failed: {e}. Retrying with auto-corrected base URL: {current_base_url}")
+                    logger.warning(f"[AgentBase] API call failed: {e}. Retrying with auto-corrected base URL: {current_base_url}")
                     continue
 
                 max_allowed = effective_max_retries * 2
                 if attempt < max_allowed - 1:
                     delay = self._compute_retry_delay(e, attempt, using_backup, effective_max_retries)
-                    print(f"[AgentBase] API call failed: {e}. Attempt {attempt + 1}. Retrying in {delay:.2f} seconds...")
+                    logger.warning(f"[AgentBase] API call failed: {e}. Attempt {attempt + 1}. Retrying in {delay:.2f} seconds...")
                     await asyncio.sleep(delay)
                 else:
                     raise
@@ -174,7 +243,8 @@ class AgentBase:
         await broadcast_prompt_token_warning(self, PROMPT_TOKEN_WARNING_THRESHOLD)
 
     async def _switch_to_backup_provider(
-        self, app_settings: dict, current_base_url: str, current_api_key: str, current_model: str
+        self, app_settings: dict, current_base_url: str, current_api_key: str, current_model: str,
+        failure_reason: str | None = None,
     ) -> tuple[bool, str, str, str]:
         """切换到备份 provider。返回 (是否切换成功, 新base_url, 新api_key, 新model)。"""
         try:
@@ -189,14 +259,14 @@ class AgentBase:
             current_base_url = backup.base_url
             current_api_key = backup.api_key
             current_model = backup.model
-            print(f"[AgentBase] Primary model call failed. Switching to Backup Provider: {backup.provider_name} (Model: {current_model})...")
+            logger.info(f"[AgentBase] Primary model call failed. Switching to Backup Provider: {backup.provider_name} (Model: {current_model})...")
             pid = getattr(self, 'project_id', None)
             current_ch = getattr(self, 'current_chapter', 0)
             if pid and current_ch:
-                await record_backup_model_flag(pid, current_ch, current_model)
+                await record_backup_model_flag(pid, current_ch, current_model, failure_reason)
             return True, current_base_url, current_api_key, current_model
         except Exception as ex:
-            print(f"[AgentBase ERROR] Failed to load backup provider settings: {ex}")
+            logger.error(f"[AgentBase ERROR] Failed to load backup provider settings: {ex}")
             return False, current_base_url, current_api_key, current_model
 
     def _apply_api_usage(self, api_usage: Optional[dict], res_str: str, count_tokens) -> None:
@@ -221,7 +291,7 @@ class AgentBase:
             e,
             attempt,
             max_retries,
-            base_retry_delay=settings.RETRY_DELAY,
+            base_retry_delay=get_value_sync("llm_retry_delay_seconds"),
         )
 
 
@@ -255,7 +325,8 @@ class AgentBase:
                 response_format={"type": "json_object"}
             )
         except Exception as e:
-            print(f"[AgentBase] JSON mode call failed: {e}. Retrying without JSON response_format constraint (budget=1)...")
+            logger.warning(f"[AgentBase] JSON mode call failed: {e}. Retrying without JSON response_format constraint (budget=1)...")
+            record_json_recovery(str(e))
             raw = await self.call_llm(
                 system_prompt,
                 user_prompt,

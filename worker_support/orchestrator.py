@@ -3,6 +3,9 @@
 本模块仅负责调度。实际的章节生成逻辑在 worker_support/generate_job_runner.py，
 向量同步在 worker_support/vector_outbox_worker.py，孤儿任务清理在
 worker_support/orphan_cleaner.py。
+
+worker.py（外部模式）与 main.py lifespan（内嵌模式）共用 bootstrap_worker_context
++ start_worker_loops —— 本模块是工作循环的唯一装配点。
 """
 from __future__ import annotations
 
@@ -17,13 +20,18 @@ from typing import Awaitable, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import settings
 from database import async_session
 from models.novel import IssueSummary, Job, Novel
-from services.novel_constants import JOB_TYPE_GENERATE, OPTIMIZED_ISSUE_SUMMARY_PREFIX
+from services.novel_constants import (
+    JOB_TYPE_CHARACTER_BRANCH,
+    JOB_TYPE_GENERATE,
+    JOB_TYPE_POST_PROCESSING,
+    OPTIMIZED_ISSUE_SUMMARY_PREFIX,
+)
 from services.job_payload import append_job_error, get_job_params
 from services.pipeline_transitions import StateMachine
 from services.pipeline_types import JobStatus, NovelStatus
+from services.runtime_tunables_service import get_value
 from worker_support.generation_exceptions import JobAbortedException, JobPausedException
 from worker_support.generate_job_runner import process_single_chapter
 from worker_support.generation_batch import update_novel_status_on_finished
@@ -31,13 +39,14 @@ from worker_support.generation_job_batch_runner import process_generate_job
 from worker_support.orphan_cleaner import cleanup_orphaned_jobs, cleanup_orphaned_jobs_periodic
 from worker_support.task_registry import (
     active_count,
-    cancel as cancel_task,
     reap_finished,
     register as register_task,
 )
 
 logger = logging.getLogger(__name__)
 from worker_support.vector_outbox_worker import poll_vector_outbox
+from worker_support.character_branch_job import process_character_branch_job
+from worker_support.post_processing_job import process_post_processing_job
 
 # ---------------------------------------------------------------------------
 # 向后兼容 re-exports
@@ -69,6 +78,8 @@ def _always_run(novel_status: str | None) -> bool:
 
 JOB_HANDLERS: dict[str, tuple[JobHandler, NovelStatusGate]] = {
     JOB_TYPE_GENERATE: (process_generate_job, _generate_status_gate),
+    JOB_TYPE_CHARACTER_BRANCH: (process_character_branch_job, _always_run),
+    JOB_TYPE_POST_PROCESSING: (process_post_processing_job, _always_run),
 }
 
 
@@ -110,9 +121,10 @@ async def process_job(job_id: str, already_running: bool = False):
 
         try:
             handler_entry = _get_job_handler(job.type)
-            if handler_entry is not None:
-                handler, _gate = handler_entry
-                await handler(db, job)
+            if handler_entry is None:
+                raise ValueError(f"Unsupported job type: {job.type}")
+            handler, _gate = handler_entry
+            await handler(db, job)
             if job.status not in [
                 JobStatus.PAUSED,
                 JobStatus.CANCELLED,
@@ -139,6 +151,9 @@ async def process_job(job_id: str, already_running: bool = False):
                     except Exception:
                         logger.exception("issue_optimization_mark_failed job_id=%s issue_id=%s", job_id, issue_id)
         except Exception as e:
+            # handler 可能留下处于 pending-rollback 状态的 session（DB 类异常），
+            # 不先 rollback 的话下面的恢复查询自身会再抛，job 永久卡 RUNNING。
+            await db.rollback()
             job_res = await db.execute(select(Job).where(Job.id == uuid.UUID(job_id)))
             job = job_res.scalar_one_or_none()
             if not job:
@@ -194,6 +209,12 @@ async def claim_pending_jobs(limit: int) -> list[str]:
     if limit <= 0:
         return []
 
+    # 全局暂停领取（runtime_tunables 的 worker_claim_paused，前端可切）：
+    # paused 直接不领新任务，**在跑任务继续到检查点** —— 匹配"随时暂停随时
+    # 介入"的语义，不是杀任务。TTL 缓存使开关秒级生效且不给 DB 加压力。
+    if await get_value("worker_claim_paused"):
+        return []
+
     async with async_session() as db:
         async with db.begin():
             result = await db.execute(
@@ -201,7 +222,7 @@ async def claim_pending_jobs(limit: int) -> list[str]:
                 .outerjoin(Novel, Job.project_id == Novel.id)
                 .where(Job.status == JobStatus.PENDING)
                 .order_by(Job.created_at)
-                .with_for_update(skip_locked=True)
+                .with_for_update(of=Job, skip_locked=True)
                 .limit(max(limit * 4, 32))
             )
             claimed: list[str] = []
@@ -210,6 +231,8 @@ async def claim_pending_jobs(limit: int) -> list[str]:
                     break
                 handler_entry = _get_job_handler(job.type)
                 if handler_entry is None:
+                    job.status = JobStatus.FAILED
+                    append_job_error(job, f"Unsupported job type: {job.type}")
                     continue
                 _handler, gate = handler_entry
                 if not gate(novel_status):
@@ -223,7 +246,9 @@ async def poll_jobs():
     while True:
         try:
             reap_finished()
-            capacity = max(0, (getattr(settings, "MAX_CONCURRENT_JOBS", 3) or 3) - active_count())
+            # 并发上限入库(runtime_tunables):每轮循环读取,前端改完下一轮生效。
+            max_jobs = await get_value("max_concurrent_jobs")
+            capacity = max(0, max_jobs - active_count())
             claimed_ids = await claim_pending_jobs(capacity)
         except Exception:
             logger.exception("job_poll_claim_failed")
@@ -231,19 +256,66 @@ async def poll_jobs():
 
         for job_id in claimed_ids:
             task = asyncio.create_task(process_job(job_id, already_running=True))
-            register_task(job_id, task)
+            await register_task(job_id, task)
 
-        await asyncio.sleep(settings.WORKER_POLL_INTERVAL)
-
-
-async def main():
-    await cleanup_orphaned_jobs()
-    await asyncio.gather(
-        poll_jobs(),
-        poll_vector_outbox(),
-        cleanup_orphaned_jobs_periodic(),
-    )
+        await asyncio.sleep(await get_value("worker_poll_interval_seconds"))
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+async def bootstrap_worker_context() -> None:
+    """worker 启动引导：init_db + tokenizer/chroma 预热 + workflow_registry 刷新。
+
+    worker.py（外部模式）与 main.py lifespan（内嵌模式）共用，保证两条入口
+    的预热与装配行为一致 —— 这是"单进程为默认"后唯一的工作循环装配点。
+    """
+    from database import init_db
+    from config import settings
+
+    await init_db()
+
+    # 预热 tokenizer：首次 AutoTokenizer.from_pretrained 是数秒级磁盘加载，
+    # 不预热的话会卡在第一次 LLM 调用里。
+    try:
+        from services.token_count import preload_tokenizer
+
+        if await asyncio.to_thread(preload_tokenizer):
+            logger.info("tokenizer_preloaded")
+    except Exception:
+        logger.exception("tokenizer_preload_failed")
+
+    # 预热 chroma：打开 client、读写探针、embedding 会话建立。把首次 ONNX
+    # 下载/推理这类挂死源移出热路径，启动期就暴露"兜底召回不可用"。
+    if settings.CHROMA_WARMUP_ENABLED:
+        try:
+            from services.vector_chroma import preload_chroma
+
+            ok = await asyncio.to_thread(preload_chroma)
+            logger.info("chroma_preloaded ok=%s", ok)
+        except Exception:
+            logger.exception("chroma_preload_failed")
+
+    # 预热工作流缓存。`workflow_surface.strategy_for()` 在提示词组装的同步热路径上被
+    # 调用，拿不到 session；`get_pipeline_config` 每章会顺手填充，但独立 worker 里
+    # 有些路径（记忆合并、完结审校）会在那之前就问表面策略。静态兜底覆盖内置两行，
+    # 这里是为了让**自定义工作流**从第一个任务起就正确。
+    try:
+        from services import workflow_registry
+
+        async with async_session() as session:
+            count = await workflow_registry.refresh(session)
+        logger.info("workflow_registry_loaded workflows=%s", count)
+    except Exception:
+        logger.exception("workflow_registry_load_failed")
+
+
+def start_worker_loops() -> dict[str, "asyncio.Task"]:
+    """启动三个工作循环（job 轮询 / 向量外发 / 孤儿清理），返回句柄供收尾取消。
+
+    在已运行的事件循环里调用（FastAPI lifespan 或 worker.py 的 asyncio.run）。
+    """
+    from worker_support.orphan_cleaner import cleanup_orphaned_jobs_periodic
+
+    return {
+        "jobs_task": asyncio.create_task(poll_jobs()),
+        "vector_task": asyncio.create_task(poll_vector_outbox()),
+        "orphan_cleanup_task": asyncio.create_task(cleanup_orphaned_jobs_periodic()),
+    }

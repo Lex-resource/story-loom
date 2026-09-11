@@ -8,9 +8,7 @@ export const PAPER = '#f5f0e8';
 export const GOLD = '#b8860b';
 export const VERMILION = '#c23a2b';
 
-export const GENERIC_ROLES = [
-  '主角', '配角', '反派', '未知', '系统', 'other', '主角团', '反派团',
-];
+export const GENERIC_ROLES = ['主角', '配角', '反派', '未知', '系统', 'other', '主角团', '反派团'];
 
 export const SECT_SUFFIXES = ['宗', '阁', '门', '谷', '派', '会', '集市', '大阵', '势力', '盟'];
 

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from typing import Dict, Set
@@ -6,6 +7,7 @@ import httpx
 from fastapi import WebSocket
 
 from config import settings
+from services.runtime_tunables_service import get_value
 from services.stream_constants import (
     STREAM_FORWARD_TIMEOUT_SECONDS,
 )
@@ -71,11 +73,34 @@ class StreamManager:
         if not connections:
             return
         payload = {"type": event_type, **data}
-        for ws in list(connections):
+        # 并发投递 + 每客户端超时：一个慢客户端只损失自己的连接，
+        # 不能阻塞其他订阅者或广播调用方。
+        await asyncio.gather(
+            *(
+                self._send_to(ws, project_id, payload)
+                for ws in list(connections)
+            ),
+            return_exceptions=True,
+        )
+
+    async def _send_to(self, ws: WebSocket, project_id: str, payload: dict) -> None:
+        # 单个客户端投递超时：一个不读 socket 的慢客户端否则会串行拖住所有订阅者，
+        # 并经 llm_responses 的内联 chunk 回调反向卡住 LLM 流消费。超时即踢出。
+        # 值入库(runtime_tunables),每次投递读取。
+        deliver_timeout = await get_value("stream_deliver_timeout_seconds")
+        try:
+            await asyncio.wait_for(
+                ws.send_json(payload), timeout=deliver_timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning("stream_client_slow_kicked project_id=%s", project_id)
+            self.unregister_connection(project_id, ws)
             try:
-                await ws.send_json(payload)
+                await ws.close(code=1011)
             except Exception:
-                logger.info("stream_client_disconnected project_id=%s", project_id)
-                self.unregister_connection(project_id, ws)
+                pass
+        except Exception:
+            logger.info("stream_client_disconnected project_id=%s", project_id)
+            self.unregister_connection(project_id, ws)
 
 stream_manager = StreamManager()

@@ -190,6 +190,21 @@ class StateMachine:
         validate_state_consistency(job, chapter, novel)
 
     @staticmethod
+    def cancel_job(job, chapter=None, novel=None):
+        """取消任务(worker 控制端点用)。
+
+        generate 任务的 novel 离开 GENERATING 置 PAUSED(与 pause 同语义,
+        项目可从锚点恢复);**不动 current_step** —— 保留 resume 锚点语义,
+        不引入新取值。
+        """
+        if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
+            return
+        job.status = JobStatus.CANCELLED
+        if novel and novel.status == NovelStatus.GENERATING:
+            novel.status = NovelStatus.PAUSED
+        validate_state_consistency(job, chapter, novel)
+
+    @staticmethod
     def complete_job(job, chapter=None, novel=None):
         if job.status in (JobStatus.FAILED, JobStatus.CANCELLED):
             return

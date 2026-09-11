@@ -1,6 +1,8 @@
 """Core novel, job, chapter, and API constants."""
 
 JOB_TYPE_GENERATE: str = "generate"
+JOB_TYPE_CHARACTER_BRANCH: str = "character_branch"
+JOB_TYPE_POST_PROCESSING: str = "post_processing"
 
 DEFAULT_CHAPTER_INDEX: int = 1
 DEFAULT_WORD_COUNT_PER_CHAPTER: int = 3000
@@ -35,7 +37,6 @@ SHORT_MANUSCRIPT_CONTEXT_MAX_CHARS: int = 60_000
 
 ORPHANED_JOB_STALE_SECONDS: int = 90
 DEFAULT_WATCHDOG_TIMEOUT_SECONDS: int = 45
-MIN_WATCHDOG_P95_SECONDS: float = 15.0
 
 CHAPTER_TITLE_TEMPLATE: str = "第{}章"
 CHAPTER_VERSION_DIR_TEMPLATE: str = "chapter_{:03d}"

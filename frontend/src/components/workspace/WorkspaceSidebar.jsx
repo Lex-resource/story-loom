@@ -9,7 +9,7 @@ const REVIEW_FLAG_LABELS = {
   editor_force_revised: '编辑强制精修',
   validator_auto_force_saved: '法则自动放行',
   pending_review: '待人工审核',
-  short_story_full_review: '全文审校'
+  short_story_full_review: '全文审校',
 };
 
 function getReviewFlagLabel(type) {
@@ -43,7 +43,9 @@ const ChapterListItem = memo(function ChapterListItem({ ch, isActive, onSelectCh
     >
       <div style={{ maxWidth: '180px', minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span className="font-semibold text-sm truncate" style={{ minWidth: 0 }}>第{ch.chapter_index}章</span>
+          <span className="font-semibold text-sm truncate" style={{ minWidth: 0 }}>
+            第{ch.chapter_index}章
+          </span>
           {flags.length > 0 && (
             <div
               style={{ position: 'relative', display: 'inline-flex', flex: '0 0 auto' }}
@@ -54,40 +56,54 @@ const ChapterListItem = memo(function ChapterListItem({ ch, isActive, onSelectCh
                 size={14}
                 style={{
                   color: getFlagIconColor(sev),
-                  cursor: 'pointer'
+                  cursor: 'pointer',
                 }}
               />
               {isHovered && (
-                <div style={{
-                  position: 'absolute',
-                  left: '20px',
-                  top: '-10px',
-                  zIndex: 9999,
-                  width: '320px',
-                  maxWidth: 'min(320px, calc(100vw - 48px))',
-                  backgroundColor: '#1f2937',
-                  color: '#fff',
-                  padding: '10px 14px',
-                  borderRadius: '8px',
-                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2)',
-                  border: '1px solid #374151',
-                  fontSize: '11px',
-                  lineHeight: '1.4',
-                  textAlign: 'left',
-                  whiteSpace: 'normal',
-                  overflowWrap: 'break-word'
-                }}>
-                  <div style={{ fontWeight: 'bold', borderBottom: '1px solid #374151', paddingBottom: '4px', marginBottom: '6px', color: '#f3f4f6' }}>章节审计与警告标记</div>
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '20px',
+                    top: '-10px',
+                    zIndex: 9999,
+                    width: '320px',
+                    maxWidth: 'min(320px, calc(100vw - 48px))',
+                    backgroundColor: '#1f2937',
+                    color: '#fff',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2)',
+                    border: '1px solid #374151',
+                    fontSize: '11px',
+                    lineHeight: '1.4',
+                    textAlign: 'left',
+                    whiteSpace: 'normal',
+                    overflowWrap: 'break-word',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontWeight: 'bold',
+                      borderBottom: '1px solid #374151',
+                      paddingBottom: '4px',
+                      marginBottom: '6px',
+                      color: '#f3f4f6',
+                    }}
+                  >
+                    章节审计与警告标记
+                  </div>
                   <ul style={{ listStyleType: 'disc', paddingLeft: '14px', margin: 0 }}>
                     {flags.map((flag, fIdx) => (
                       <li key={fIdx} style={{ marginBottom: '4px' }}>
-                        <span style={{
-                          color: getFlagTextColor(flag.severity),
-                          fontWeight: 500
-                        }}>
+                        <span
+                          style={{
+                            color: getFlagTextColor(flag.severity),
+                            fontWeight: 500,
+                          }}
+                        >
                           [{getReviewFlagLabel(flag.type)}]
-                        </span>
-                        {' '}{flag.detail}
+                        </span>{' '}
+                        {flag.detail}
                       </li>
                     ))}
                   </ul>
@@ -102,16 +118,25 @@ const ChapterListItem = memo(function ChapterListItem({ ch, isActive, onSelectCh
   );
 });
 
-export default function WorkspaceSidebar({ loadChapterDetails, openContinueModal, onOpenChapterOverview, setAutoFollowGeneration, onNavigateToEditor }) {
-  const chapters = useProjectStore(state => state.chapters);
-  const activeChapter = useProjectStore(state => state.activeChapter);
-  const activeProject = useProjectStore(state => state.activeProject);
+export default function WorkspaceSidebar({
+  loadChapterDetails,
+  openContinueModal,
+  onOpenChapterOverview,
+  setAutoFollowGeneration,
+  onNavigateToEditor,
+}) {
+  const chapters = useProjectStore((state) => state.chapters);
+  const activeChapter = useProjectStore((state) => state.activeChapter);
+  const activeProject = useProjectStore((state) => state.activeProject);
 
-  const handleSelectChapter = useCallback((chapterIndex) => {
-    setAutoFollowGeneration?.(false);
-    loadChapterDetails(activeProject.id, chapterIndex);
-    onNavigateToEditor?.();
-  }, [loadChapterDetails, activeProject, setAutoFollowGeneration, onNavigateToEditor]);
+  const handleSelectChapter = useCallback(
+    (chapterIndex) => {
+      setAutoFollowGeneration?.(false);
+      loadChapterDetails(activeProject.id, chapterIndex);
+      onNavigateToEditor?.();
+    },
+    [loadChapterDetails, activeProject, setAutoFollowGeneration, onNavigateToEditor],
+  );
 
   return (
     <div className="workspace-left">
@@ -134,7 +159,12 @@ export default function WorkspaceSidebar({ loadChapterDetails, openContinueModal
         >
           <div className="truncate" style={{ maxWidth: '180px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span className="font-semibold text-sm" style={{ color: !activeChapter ? 'var(--color-blue, #3b82f6)' : 'var(--text-primary)' }}>📚 全书骨架大纲</span>
+              <span
+                className="font-semibold text-sm"
+                style={{ color: !activeChapter ? 'var(--color-blue, #3b82f6)' : 'var(--text-primary)' }}
+              >
+                📚 全书骨架大纲
+              </span>
             </div>
             <p className="text-xs text-secondary truncate">全局世界观与剧情设定</p>
           </div>
@@ -146,11 +176,18 @@ export default function WorkspaceSidebar({ loadChapterDetails, openContinueModal
             setAutoFollowGeneration?.(false);
             onOpenChapterOverview?.();
           }}
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', marginBottom: '8px', paddingBottom: '12px', cursor: 'pointer' }}
+          style={{
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
+            marginBottom: '8px',
+            paddingBottom: '12px',
+            cursor: 'pointer',
+          }}
         >
           <div className="truncate" style={{ maxWidth: '180px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span className="font-semibold text-sm" style={{ color: 'var(--gold)' }}>📖 分章大纲总览</span>
+              <span className="font-semibold text-sm" style={{ color: 'var(--gold)' }}>
+                📖 分章大纲总览
+              </span>
             </div>
             <p className="text-xs text-secondary truncate">查看全书各章节的大纲摘要</p>
           </div>

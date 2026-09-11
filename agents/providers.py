@@ -10,6 +10,7 @@ class ProviderSelection:
     api_key: str
     model: str
     provider_name: Optional[str] = None
+    embedding_model: Optional[str] = None
 
 
 def resolve_active_provider(app_settings: dict, model_override: Optional[str] = None) -> ProviderSelection:
@@ -28,6 +29,11 @@ def resolve_active_provider(app_settings: dict, model_override: Optional[str] = 
         api_key=api_key,
         model=model,
         provider_name=active_provider.get("name") if active_provider else None,
+        embedding_model=(
+            active_provider.get("embedding_model")
+            if active_provider
+            else None
+        ) or settings.EMBEDDING_MODEL or None,
     )
 
 
@@ -41,10 +47,10 @@ def resolve_backup_provider(
     active_id = app_settings.get("active_provider_id", "default")
     backup_id = app_settings.get("backup_provider_id")
     backup_provider = None
-    if backup_id:
+    if backup_id and backup_id != active_id:
         backup_provider = next((provider for provider in providers if provider.get("id") == backup_id), None)
-    if not backup_provider and providers:
-        backup_provider = next((provider for provider in providers if provider.get("id") != active_id), None)
+    # A backup provider is opt-in. Never silently route requests to an
+    # arbitrary configured provider that the user did not designate.
     if not backup_provider:
         return False, ProviderSelection(current_base_url, current_api_key, current_model)
     return True, ProviderSelection(
@@ -52,4 +58,5 @@ def resolve_backup_provider(
         api_key=backup_provider.get("api_key", current_api_key),
         model=backup_provider.get("model", current_model),
         provider_name=backup_provider.get("name"),
+        embedding_model=backup_provider.get("embedding_model") or None,
     )

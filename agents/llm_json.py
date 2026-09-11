@@ -7,6 +7,11 @@ import json_repair
 from agents.constants import JSON_REPAIR_TIMEOUT_SECONDS
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 class LLMJSONParsingError(Exception):
     def __init__(
         self,
@@ -79,13 +84,13 @@ async def parse_llm_json_response(raw: str, response_schema: Optional[Any] = Non
                     if isinstance(repaired_stripped, (dict, list)):
                         parsed = repaired_stripped
             except asyncio.TimeoutError:
-                print(f"[json_repair failed]: Timeout after {JSON_REPAIR_TIMEOUT_SECONDS}s")
+                logger.warning(f"[json_repair failed]: Timeout after {JSON_REPAIR_TIMEOUT_SECONDS}s")
             except Exception as repair_err:
-                print(f"[json_repair failed]: {repair_err}")
+                logger.warning(f"[json_repair failed]: {repair_err}")
 
             if parsed is None:
-                print(f"[call_llm_json parsing error] Failed to parse: {error}")
-                print(f"[call_llm_json raw output]: {raw[:500]}...")
+                logger.error(f"[call_llm_json parsing error] Failed to parse: {error}")
+                logger.warning(f"[call_llm_json raw output]: {raw[:500]}...")
                 raise LLMJSONParsingError(
                     f"Failed to parse JSON response: {error}",
                     raw_response=raw,
@@ -96,7 +101,7 @@ async def parse_llm_json_response(raw: str, response_schema: Optional[Any] = Non
             validated_obj = response_schema.model_validate(parsed)
             return validated_obj.model_dump(by_alias=True)
         except Exception as validation_error:
-            print(f"[call_llm_json schema validation error]: {validation_error}")
+            logger.error(f"[call_llm_json schema validation error]: {validation_error}")
             raw_parsed = json.dumps(parsed, ensure_ascii=False) if parsed is not None else raw
             raise LLMJSONParsingError(
                 f"Schema validation failed: {validation_error}",

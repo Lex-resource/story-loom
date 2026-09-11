@@ -7,25 +7,25 @@ export function getReviewFlags(ch) {
   if (ch.review_flags && ch.review_flags.length > 0) {
     flags.push(...ch.review_flags);
   }
-  const hasForcePublishFlag = flags.some(flag => flag?.type === 'force_corrected');
+  const hasForcePublishFlag = flags.some((flag) => flag?.type === 'force_corrected');
   if (ch.status === 'pending_review') {
     flags.push({
       type: 'pending_review',
       detail: '本章节格式校验或天道审计异常，等待人工审阅与修复',
-      severity: 'error'
+      severity: 'error',
     });
   }
   if (ch.validator_auto_force_saved || ch.validator_result?.auto_force_saved) {
     flags.push({
       type: 'validator_auto_force_saved',
       detail: '法则审查未通过但已按配置自动放行，请重点复核右侧审查结果',
-      severity: 'warning'
+      severity: 'warning',
     });
   } else if (ch.force_corrected && !hasForcePublishFlag) {
     flags.push({
       type: 'editor_force_revised',
       detail: '编辑智能体达到重写上限后完成强制精修；这不代表法则审查发现矛盾',
-      severity: 'info'
+      severity: 'info',
     });
   }
   return flags;
@@ -36,9 +36,7 @@ export function getReviewFlags(ch) {
 // 仅在剥离后为空时回退到原始 title。纯展示层处理，不改动后端数据。
 export function chapterDisplayTitle(title) {
   if (!title || typeof title !== 'string') return '';
-  const stripped = title
-    .replace(/^\s*第\s*[\d一二三四五六七八九十百千零两]+\s*章\s*[:：、.．\-—\s]*/, '')
-    .trim();
+  const stripped = title.replace(/^\s*第\s*[\d一二三四五六七八九十百千零两]+\s*章\s*[:：、.．\-—\s]*/, '').trim();
   return stripped || title.trim();
 }
 

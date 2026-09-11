@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.novel import Chapter, ChapterOutline
 from services.novel_constants import OUTLINE_SOURCE_EDITOR
+from services.chapter_progress import assert_chapter_not_frozen
 
 
 async def update_chapter_outline_data(
@@ -12,6 +13,7 @@ async def update_chapter_outline_data(
     chapter_index: int,
     outline: dict,
 ) -> dict:
+    assert_chapter_not_frozen(chapter)
     chapter.outline = outline
     if isinstance(outline, dict) and "title" in outline:
         chapter.title = outline["title"]

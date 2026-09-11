@@ -43,8 +43,6 @@ async def websocket_endpoint(websocket: WebSocket, project_id: str):
                 await websocket.send_json({"type": "warning", "message": "请使用 REST 暂停接口。"})
             elif msg_type == "resume":
                 await websocket.send_json({"type": "warning", "message": "请使用 REST 恢复接口。"})
-            elif msg_type == "insert_prompt":
-                await websocket.send_json({"type": "warning", "message": "请使用 REST 人工指令接口。"})
             elif msg_type == "change_model":
                 await websocket.send_json({"type": "error", "message": "模型切换仅允许通过设置接口。"})
 

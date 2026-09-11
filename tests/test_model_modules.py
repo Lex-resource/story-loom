@@ -3,6 +3,7 @@ from models.knowledge import GraphNode
 from models.novel import Job, Novel, SystemSettings
 from models.operations import PipelineConfigModel
 from models.projects import Chapter
+from models.character_branches import CharacterBranch, CharacterBranchChapter
 
 
 def test_domain_modules_register_all_tables_and_compatibility_exports():
@@ -12,4 +13,6 @@ def test_domain_modules_register_all_tables_and_compatibility_exports():
     assert GraphNode.__tablename__ == "graph_nodes"
     assert SystemSettings.__tablename__ == "system_settings"
     assert PipelineConfigModel.__tablename__ == "pipeline_configs"
+    assert CharacterBranch.__tablename__ == "character_branches"
+    assert CharacterBranchChapter.__tablename__ == "character_branch_chapters"
     assert {"novels", "chapters", "jobs", "graph_nodes"}.issubset(Base.metadata.tables)

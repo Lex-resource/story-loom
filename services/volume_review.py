@@ -20,10 +20,10 @@ precedence over any quality gain.
 
 from __future__ import annotations
 
+from agents.constants import NOVEL_FORMAT_ZHIHU_SHORT
 from services.chapter_progress import is_frozen
 from services.outline_hierarchy import extract_volumes, parse_chapter_range
 
-NOVEL_FORMAT_LONG_WEBNOVEL = "long_webnovel"
 VOLUME_REVIEW_FLAG_TYPE = "volume_read_through_review"
 
 
@@ -78,8 +78,13 @@ def assert_no_frozen_writes(targets: list) -> None:
 
 
 def should_review_volume(novel, editable: list) -> bool:
-    """Only long-form novels, and only when there is something unpublished to fix."""
-    return bool(novel.novel_format == NOVEL_FORMAT_LONG_WEBNOVEL and editable)
+    """只有走长篇表面的工作流做卷级通读，且只在有未发布内容可改时做。
+
+    按表面策略而不是格式名判断：克隆自长篇的自定义工作流有卷纲，同样需要卷级通读。
+    """
+    from services.workflow_surface import is_short_form_workflow
+
+    return bool(not is_short_form_workflow(novel.novel_format) and editable)
 
 
 def append_volume_review_flag(chapter, report: dict) -> None:
@@ -137,6 +142,11 @@ async def review_volume(db, novel, volume_index: int) -> dict | None:
         title=f"{novel.title}· {volume.get('卷名') or f'第{volume_index + 1}卷'}",
         outline=outline,
         manuscript=manuscript,
+        # `validator_review_full_story` 目前只存在于短篇模板集（prompts/validation/
+        # zhihu_short_validation.json）；长篇那份里没有这个名字。卷级通读复用它，因此这里
+        # 只能显式指向短篇类别 —— 代价是长篇卷报告用的是短篇的审校维度（开篇承诺、伏笔
+        # 公平性、情绪曲线、信息密度、结尾兑现）。给长篇写一份卷级专用模板是独立的一件事。
+        category=NOVEL_FORMAT_ZHIHU_SHORT,
     )
 
     # Red line: the flag lands only on an unpublished chapter, never a frozen one.

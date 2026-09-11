@@ -12,6 +12,27 @@ from services.pipeline_transitions import set_chapter_pipeline_step
 from services.pipeline_types import PipelineStep
 from services.project_stats import chapter_chars_from_row
 from worker_support.validation import min_score_from_evaluations, resolve_editor_decision
+from services.experiment_recorder import record_content_retry
+
+_HARD_EDITOR_CATEGORIES = {
+    "logic",
+    "consistency",
+    "timeline",
+    "item_state",
+    "location",
+    "character_state",
+}
+
+
+def _has_explicit_hard_editor_issue(editor_result: dict[str, Any]) -> bool:
+    for issue in editor_result.get("raw_issues", []) or []:
+        if not isinstance(issue, dict):
+            continue
+        severity = str(issue.get("severity") or "").lower()
+        category = str(issue.get("category") or "").lower()
+        if severity in {"block", "high", "critical"} and category in _HARD_EDITOR_CATEGORIES:
+            return True
+    return False
 
 
 def resolve_editor_decision_from_result(
@@ -23,13 +44,17 @@ def resolve_editor_decision_from_result(
         raw_decision = EDITOR_DECISION_PROCEED
     if raw_decision in {EDITOR_DECISION_PROCEED, EDITOR_DECISION_REVISE}:
         return raw_decision
-    if raw_decision == EDITOR_DECISION_REWRITE and rewrite_count > 0:
-        return EDITOR_DECISION_REWRITE
     if raw_decision == EDITOR_DECISION_REWRITE:
+        if _has_explicit_hard_editor_issue(editor_result):
+            return EDITOR_DECISION_REWRITE
+        if rewrite_count > 0:
+            return EDITOR_DECISION_REWRITE
         return EDITOR_DECISION_REVISE
 
     eval_data = editor_result.get("evaluations", {})
     if eval_data and isinstance(eval_data, dict):
+        if str(editor_result.get("edited_content") or "").strip():
+            return EDITOR_DECISION_PROCEED
         min_score = min_score_from_evaluations(eval_data)
         return resolve_editor_decision(min_score, rewrite_count, editor_result)
 
@@ -93,6 +118,7 @@ def mark_editor_rewrite(
         ensure_ascii=False,
     )
     chapter.status = "draft"
+    record_content_retry(rewrite_reason, rewrite_instructions)
 
 
 def mark_force_corrected_revision(
