@@ -13,6 +13,9 @@ AGENT_EDITOR = "editor"
 AGENT_VALIDATOR = "validator"
 AGENT_EXTRACTOR = "extractor"
 AGENT_CHARACTER_CARD = "character_card"
+# 记忆整合不是流水线节点，只是 post-processing 里的辅助调用；
+# 独立命名是为了 usage 统计里能区分整合成本，不与 extractor 混算。
+AGENT_SCENE_CONSOLIDATOR = "scene_consolidator"
 
 # 五个 agent 的规范顺序在 `services/pipeline_stages.CANONICAL_AGENT_ORDER` —— 它同时是
 # `PipelineStep` 顺序的派生依据，所以那里是唯一来源。这里不再放第二份同样的列表。
@@ -126,7 +129,10 @@ PROMPT_ISSUE_CLASSIFIER_CLASSIFY_ISSUES = "issue_classifier_classify_issues"
 PROMPT_COMMUNITY_SUMMARIZER = "community_summarizer"
 PROMPT_CHARACTER_GENERATE_CARDS = "character_generate_cards"
 PROMPT_EXTRACT_CHARACTER_CARDS = "extractor_extract_character_cards"
+# 场景块整合（ENABLE_SCENE_BLOCK_CONSOLIDATION 开启时使用）
+PROMPT_SCENE_BLOCK_CONSOLIDATION = "scene_block_consolidation"
 CHARACTER_CARD_TEMPERATURE: float = 0.25
+CONSOLIDATION_TEMPERATURE: float = 0.2
 
 # Per-agent max_tokens overrides for non-JSON call_llm paths.
 # (JSON paths use DEFAULT_LLM_JSON_MAX_TOKENS from below.)

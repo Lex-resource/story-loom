@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     EMBEDDING_BASE_URL: str = ""
     EMBEDDING_API_KEY: str = ""
 
+    # Consolidation（记忆整合，参照 Codex memories 的 extract/consolidation 双模型分离）
+    # 空 = 与主 LLM 同模型。整合只做压缩改写，通常配更便宜/长上下文的模型即可。
+    CONSOLIDATION_MODEL: str = ""
+    # false（默认）= 场景块摘要沿用大纲 summary / 正文截断的确定性来源；
+    # true = 章节发布时额外调用一次整合模型压缩场景块摘要（失败自动回退，不阻塞发布）。
+    ENABLE_SCENE_BLOCK_CONSOLIDATION: bool = False
+
     # Data / asset directories (centralized so tests and scripts can override)
     DATA_DIR: str = str(Path(__file__).parent / "data")
     SETTINGS_FILE: str = str(Path(__file__).parent / "data" / "settings.json")
@@ -138,6 +145,17 @@ class Settings(BaseSettings):
     # Extractor conflicts are reviewed deterministically and rejected without
     # blocking chapter publication; protected facts are never overwritten.
     ENABLE_AUTO_EXTRACTOR_REVIEW: bool = True
+    # 召回命中统计：recall 注入的 atom 记一次 use（recall_use_count /
+    # last_recalled_chapter），是 candidate 生命周期的数据来源。仅簿记，
+    # 不改变生成输出；失败静默跳过。
+    ENABLE_RECALL_HIT_TRACKING: bool = True
+    # candidate 生命周期清扫（参照 Codex memories 的 usage 淘汰，弱化版）：
+    # 长期零命中的 candidate 态 atom 降级为 superseded。只动 candidate，
+    # 绝不触碰 accepted —— 伏笔的到期由 valid_to_chapter 驱动，不按频率淘汰。
+    # 默认关闭，启用后生产行为才会变化。
+    ENABLE_CANDIDATE_LIFECYCLE_SWEEP: bool = False
+    # candidate 距上次被召回（无命中则按其来源章节）超过 N 章即视为陈旧。
+    CANDIDATE_SWEEP_IDLE_CHAPTERS: int = 12
     # Layered memory is the only supported generation context.
     NOVEL_MEMORY_CONTEXT_MODE: str = "layered"
     # Issue summaries belong to the retired legacy context path. Keep raw

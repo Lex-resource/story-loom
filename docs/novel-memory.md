@@ -39,6 +39,16 @@ evidence_id 的 Atom 候选；关闭 Atom 才停止结构化事实写入。角�
 
 Recall 失败返回空记忆，主流程继续使用既有 canonical context。Scene Block 聚合失败不影响章节发布，VectorOutbox 失败可重试或重建 Chroma。
 
+## 整合审计与生命周期
+
+参照 Codex memories（openai/codex 仓库 `codex-rs/memories/`）的工程机制，记忆层补了三个可观测性/生命周期设施：
+
+- **整合 diff 审计**：`novel_scene_blocks.consolidation_diff` 列记录本版本相对上一版本的结构化变更（摘要是否改写、状态键增删、开放问题与近期变化增量）。首个版本为 NULL；研究运行同时写 `scene_block_consolidation` 事件。
+- **召回命中簿记**（`ENABLE_RECALL_HIT_TRACKING`，默认开）：recall 注入的 atom 记一次 use（`recall_use_count`/`last_recalled_chapter`）。纯簿记，失败静默，不影响召回结果。
+- **candidate 生命周期清扫**（`ENABLE_CANDIDATE_LIFECYCLE_SWEEP`，默认关）：章节发布后把"最后有效使用"（`coalesce(last_recalled_chapter, source_chapter)`）落后当前章节超过 `CANDIDATE_SWEEP_IDLE_CHAPTERS` 的 candidate atom 降级 `superseded`。只动 candidate，绝不动 accepted —— 伏笔的到期由 `valid_to_chapter` 驱动，与命中频率无关。
+
+**提取/整合双模型分离**（`ENABLE_SCENE_BLOCK_CONSOLIDATION`，默认关）：开启后章节发布时由整合模型（`CONSOLIDATION_MODEL`，空则回落主 LLM）把已确认事实压缩成场景块摘要；失败或空输出自动回退到大纲 summary / 正文截断的确定性来源，不阻塞发布。整合调用以 `scene_consolidator` 名义计入 token 用量，与 extractor 分开统计。
+
 ## 启用顺序
 
 1. 保持 Evidence 开启，先观察抽取失败率、人工修正率和 Evidence 重复率。

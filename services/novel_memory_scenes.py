@@ -43,6 +43,40 @@ def scene_block_vector_id(project_id: uuid.UUID, scope_type: str, scope_key: str
     )
 
 
+def build_consolidation_diff(
+    previous_block: Any,
+    *,
+    summary: str,
+    current_state: dict[str, Any],
+    open_questions: list[Any],
+    recent_changes: list[Any],
+    source_chapter: int | None,
+) -> dict[str, Any] | None:
+    """Build the audit diff of this consolidation against the previous version.
+
+    Returns None for the first version of a scope (nothing to diff against).
+    Kept JSON-small on purpose: it rides on every scene-block row.
+    """
+    if previous_block is None:
+        return None
+    prev_state = previous_block.current_state if isinstance(previous_block.current_state, dict) else {}
+    prev_questions = list(previous_block.open_questions or [])
+    prev_changes = list(previous_block.recent_changes or [])
+    state_keys = sorted(set(prev_state) | set(current_state))
+    return {
+        "from_version": int(previous_block.version or 0),
+        "from_chapter": previous_block.source_chapter,
+        "to_chapter": source_chapter,
+        "summary_changed": str(previous_block.summary or "") != str(summary or ""),
+        "state_changed_keys": [
+            key for key in state_keys if prev_state.get(key) != current_state.get(key)
+        ],
+        "open_questions_added": [q for q in open_questions if q not in prev_questions],
+        "open_questions_removed": [q for q in prev_questions if q not in open_questions],
+        "recent_changes_appended": [c for c in recent_changes if c not in prev_changes],
+    }
+
+
 async def upsert_scene_block(
     db: AsyncSession,
     *,
@@ -84,6 +118,24 @@ async def upsert_scene_block(
     if existing is not None:
         return existing, False
 
+    previous_block = await db.scalar(
+        select(NovelSceneBlock).where(
+            NovelSceneBlock.project_id == project_id,
+            NovelSceneBlock.branch_id == branch_id,
+            NovelSceneBlock.storyline_id == storyline_id,
+            NovelSceneBlock.scope_type == scope_type,
+            NovelSceneBlock.scope_key == scope_key,
+        ).order_by(NovelSceneBlock.version.desc())
+    )
+    consolidation_diff = build_consolidation_diff(
+        previous_block,
+        summary=summary,
+        current_state=state,
+        open_questions=questions,
+        recent_changes=changes,
+        source_chapter=source_chapter,
+    )
+
     for _attempt in range(5):
         max_version = await db.scalar(
             select(func.max(NovelSceneBlock.version)).where(
@@ -113,6 +165,7 @@ async def upsert_scene_block(
             "open_questions": questions,
             "recent_changes": changes,
             "status": SCENE_BLOCK_ACTIVE,
+            "consolidation_diff": consolidation_diff,
         }
         await db.execute(pg_insert(NovelSceneBlock).values(**values).on_conflict_do_nothing())
         block = await db.scalar(
@@ -177,4 +230,23 @@ async def aggregate_scene_block(
     block, created = await upsert_scene_block(db, **kwargs)
     if created:
         await enqueue_scene_block_vector(db, block)
+        if getattr(block, "consolidation_diff", None) is not None:
+            # 研究运行的事件流（生产无 ExperimentContext 时为 no-op）；
+            # 生产审计以 novel_scene_blocks.consolidation_diff 列为准。
+            from services.experiment_recorder import record_event
+
+            record_event(
+                "scene_block_consolidation",
+                {
+                    "project_id": str(block.project_id),
+                    "scope_type": block.scope_type,
+                    "scope_key": block.scope_key,
+                    "version": block.version,
+                    **_safe_diff(block.consolidation_diff),
+                },
+            )
     return block
+
+
+def _safe_diff(diff: Any) -> dict[str, Any]:
+    return diff if isinstance(diff, dict) else {}

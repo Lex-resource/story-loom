@@ -9,6 +9,7 @@ from models.novel import Novel, Chapter
 from agents.constants import (
     AGENT_EXTRACTOR,
     AGENT_CHARACTER_CARD,
+    AGENT_SCENE_CONSOLIDATOR,
 )
 from agents.pipeline import ExtractorNode
 from agents.pipeline_context import PipelineContext
@@ -38,6 +39,7 @@ from services.novel_memory_atoms import (
     sync_world_rule_doctrines,
 )
 from services.novel_memory_conflicts import record_hard_conflicts
+from services.novel_memory_lifecycle import sweep_stale_atom_candidates
 from services.novel_memory_conflicts import (
     is_hard_extractor_issue,
     resolve_conflicts_automatically,
@@ -48,6 +50,51 @@ from services.chapter_continuity import build_chapter_handoff
 from services.memory_manager import MemoryManager
 
 logger = logging.getLogger(__name__)
+
+
+async def _consolidate_scene_summary(
+    db: AsyncSession,
+    novel: Novel,
+    chapter: Chapter,
+    fallback_summary: str,
+    accepted_atoms: list[Any],
+) -> str:
+    """Compress the chapter into a scene-block summary with the consolidation model.
+
+    Best-effort by design: any failure or empty output returns "" so the caller
+    falls back to the deterministic outline-summary / chapter-tail source.
+    """
+    try:
+        from agents.scene_consolidator_agent import SceneConsolidatorAgent
+
+        agent = SceneConsolidatorAgent()
+        atom_statements = [
+            str(getattr(atom, "statement", "") or "").strip()
+            for atom in (accepted_atoms or [])
+        ]
+        atom_statements = [item for item in atom_statements if item][:12]
+        summary = await agent.consolidate_scene_summary(
+            novel_format=novel.novel_format,
+            chapter_title=chapter.title or "",
+            chapter_tail=(chapter.content or "")[-1500:],
+            accepted_atoms=atom_statements,
+            outline_summary=fallback_summary,
+        )
+        if summary:
+            await agent.record_usage(
+                db,
+                novel.id,
+                chapter.chapter_index,
+                AGENT_SCENE_CONSOLIDATOR,
+            )
+        return summary
+    except Exception:
+        logger.exception(
+            "scene_block_consolidation_failed project_id=%s chapter_index=%s",
+            novel.id,
+            chapter.chapter_index,
+        )
+        return ""
 
 def append_extractor_review_flag(
     chapter: Chapter,
@@ -220,6 +267,21 @@ async def apply_extractor_updates(
             atoms=accepted_memory_atoms,
         )
 
+    if settings.ENABLE_CANDIDATE_LIFECYCLE_SWEEP:
+        try:
+            await sweep_stale_atom_candidates(
+                db,
+                project_id=novel.id,
+                current_chapter=chapter_index,
+                idle_chapters=settings.CANDIDATE_SWEEP_IDLE_CHAPTERS,
+            )
+        except Exception:
+            logger.exception(
+                "candidate_lifecycle_sweep_failed project_id=%s chapter_index=%s",
+                novel.id,
+                chapter_index,
+            )
+
     publish_chapter_state(chapter)
     chapter.error = None
     novel.current_chapter = max(novel.current_chapter or 0, chapter_index)
@@ -232,6 +294,11 @@ async def apply_extractor_updates(
     if settings.ENABLE_NOVEL_MEMORY_SCENE_BLOCKS:
         outline = chapter.outline if isinstance(chapter.outline, dict) else {}
         summary = str(outline.get("summary") or (chapter.content or "")[:800]).strip()
+        if settings.ENABLE_SCENE_BLOCK_CONSOLIDATION:
+            summary = (
+                await _consolidate_scene_summary(db, novel, chapter, summary, accepted_memory_atoms)
+                or summary
+            )
         recent_changes = [
             f"{patch.category}:{patch.name}:{patch.operation}"
             for patch in patch_set.patches

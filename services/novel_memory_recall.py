@@ -7,10 +7,11 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.novel_memory import NovelMemoryAtom, NovelSceneBlock, ProjectDoctrine
+from config import settings
 from services.context_compaction import compact_text, context_budget_for
 from services.novel_memory_types import (
     ATOM_STATUS_ACCEPTED,
@@ -173,6 +174,39 @@ def budget_for(agent_type: str) -> RecallBudget:
     return RECALL_BUDGETS.get(agent_type, RECALL_BUDGETS["writer"])
 
 
+async def _record_recall_hits(db: AsyncSession, chapter_index: int, items: list[Any]) -> None:
+    """Best-effort hit bookkeeping for the candidate lifecycle sweep.
+
+    Recall is advisory, so bookkeeping must never break it: every failure is
+    logged and swallowed. The sweep in services.novel_memory_lifecycle reads
+    these counters later; nothing here changes what agents see in context.
+    """
+    if not settings.ENABLE_RECALL_HIT_TRACKING:
+        return
+    ids: list[Any] = []
+    seen: set[Any] = set()
+    for item in items:
+        item_id = getattr(item, "id", None)
+        if item_id is None or item_id in seen:
+            continue
+        seen.add(item_id)
+        ids.append(item_id)
+    if not ids:
+        return
+    try:
+        await db.execute(
+            update(NovelMemoryAtom)
+            .where(NovelMemoryAtom.id.in_(ids))
+            .values(
+                recall_use_count=NovelMemoryAtom.recall_use_count + 1,
+                last_recalled_chapter=chapter_index,
+            )
+            .execution_options(synchronize_session=False)
+        )
+    except Exception:
+        logger.warning("novel_memory_recall_hit_tracking_failed", exc_info=True)
+
+
 async def recall_novel_memory(
     db: AsyncSession,
     *,
@@ -281,6 +315,12 @@ async def recall_novel_memory(
                 query_text,
                 agent_type,
             )
+        injected_keys = [
+            str(getattr(item, "memory_key", "") or "")
+            for item in (*atoms, *due_atoms, *candidate_atoms)
+            if str(getattr(item, "memory_key", "") or "")
+        ]
+        await _record_recall_hits(db, chapter_index, [*atoms, *due_atoms, *candidate_atoms])
         from services.experiment_recorder import record_event
 
         record_event(
@@ -293,6 +333,7 @@ async def recall_novel_memory(
                 "candidate_atom_count": len(candidate_atoms),
                 "vector_advisory_count": len(hybrid_context.splitlines()) if hybrid_context else 0,
                 "hybrid_enabled": bool(include_vector),
+                "injected_memory_keys": injected_keys[:50],
             },
         )
         return NovelMemoryRecall(

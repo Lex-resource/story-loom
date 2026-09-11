@@ -123,6 +123,9 @@ class NovelMemoryAtom(_NovelMemoryScoped):
     statement = Column(Text, nullable=False)
     data = Column(JSON, nullable=False, default=dict)
     status = Column(String(20), nullable=False, default=ATOM_STATUSES[0], server_default=ATOM_STATUSES[0])
+    # 召回命中簿记（ENABLE_RECALL_HIT_TRACKING）：candidate 生命周期清扫的数据源。
+    recall_use_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_recalled_chapter = Column(Integer, nullable=True)
 
     @validates("status")
     def validate_status(self, _key, value):
@@ -156,6 +159,9 @@ class NovelSceneBlock(_NovelMemoryScoped):
     open_questions = Column(JSON, nullable=False, default=list)
     recent_changes = Column(JSON, nullable=False, default=list)
     status = Column(String(20), nullable=False, default=SCENE_BLOCK_ACTIVE, server_default=SCENE_BLOCK_ACTIVE)
+    # 本版本相对上一版本的整合审计（参照 Codex memories 的 phase2 diff）：
+    # 首个版本为 NULL；结构见 services.novel_memory_scenes.build_consolidation_diff。
+    consolidation_diff = Column(JSON, nullable=True)
 
 
 class ProjectDoctrine(_NovelMemoryScoped):

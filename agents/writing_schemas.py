@@ -291,3 +291,9 @@ def _coerce_list(value: Any) -> list[Any]:
             return parsed
         return [value]
     return [value]
+
+
+class SceneBlockConsolidation(BaseModel):
+    """整合模型的场景块压缩输出：只允许一个摘要字段，失败回退确定性来源。"""
+
+    summary: str = Field(default="", description="压缩后的剧情线场景块摘要")
