@@ -127,8 +127,18 @@ worker_support/   任务编排:orchestrator 是 worker 循环唯一装配点
     ├── worker.py ─┘   外部模式薄壳(默认不用;API lifespan 内嵌同一套循环)
     └── agents/pipeline.py
         Planner → Writer → Editor → Validator → Extractor
+core/                         中立词汇层:agent 名/流水线枚举/记忆与角色常量。
+                              依赖图的叶子(只许 import 标准库);models 与
+                              services 都从这里向下引用,禁止反向依赖 services
 research/                     78 个实验版本(生产不导入)
 ```
+
+词汇与调参的落点:`core/` 只放跨层词汇;agent 注册表在 `agents/agent_registry.py`,
+数值调参在 `agents/tuning.py`(两者经 `agents/constants.py` facade 再导出);
+per-agent 召回预算统一在 `services/novel_memory_recall.AGENT_RECALL_PROFILES`
+单表;前端事件名与 extractor 阶段文案在 `services/stream_events.py`。
+`services/experiment_recorder/` 是包(io/context/events/manifest/publication),
+`services/experiment_recorder.__init__` 再导出完整公共面。
 
 **流水线**:`agents/pipeline.py` 用 `@register_node` 注册五个节点,各节点靠 `_fork()` 浅拷贝 context 避免污染共享状态。单章的**编排**由图解释器驱动(见上),而不是硬编码的顺序。新增 Job 类型只需在 `worker_support/orchestrator.py:JOB_HANDLERS` 注册 handler。
 
