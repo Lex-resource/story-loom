@@ -22,7 +22,6 @@ from agents.prompt_hints import (
     narrative_index_hint,
     novel_memory_hint,
     previous_ending_for_prompt,
-    v7_continuity_state_hint,
     validator_extra_requirements,
     validator_trailing_hint,
 )

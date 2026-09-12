@@ -12,7 +12,7 @@ from worker_support.chapter_repository import (
     sync_chapter_outline,
 )
 from worker_support.events import GenerationEvents
-from worker_support.generation_context import append_user_intervention, with_short_term_context
+from worker_support.generation_context import append_user_intervention
 from services.continuity_contract import sanitize_outline_for_contract
 
 def normalize_outline_data(outline: dict) -> dict:

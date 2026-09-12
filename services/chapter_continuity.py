@@ -16,9 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.novel import Chapter
 from models.novel_memory import NovelMemoryAtom, NovelSceneBlock
-from services.context_compaction import compact_items, compact_json, compact_text
+from services.context_compaction import compact_json, compact_text
 from services.novel_memory_types import ATOM_STATUS_ACCEPTED, STORYLINE_MAIN
-from services.continuity_contract import build_dramatic_turn_projection
 from services.chapter_handoff_formatting import ChapterHandoffFormattingMixin
 
 

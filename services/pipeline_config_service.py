@@ -8,11 +8,10 @@ from typing import TYPE_CHECKING, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agents.constants import AGENT_EDITOR, AGENT_WRITER, NOVEL_FORMAT_ZHIHU_SHORT
+from agents.constants import AGENT_EDITOR, AGENT_WRITER
 from models.novel import PipelineConfigModel
 
 if TYPE_CHECKING:
-    from services.chapter_graph import ChapterGraph
     from services.pipeline_stages import StagePlan
 
 

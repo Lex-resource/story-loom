@@ -10,7 +10,6 @@ worker.py（外部模式）与 main.py lifespan（内嵌模式）共用 bootstra
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import traceback
 import uuid
@@ -33,10 +32,8 @@ from services.pipeline_transitions import StateMachine
 from services.pipeline_types import JobStatus, NovelStatus
 from services.runtime_tunables_service import get_value
 from worker_support.generation_exceptions import JobAbortedException, JobPausedException
-from worker_support.generate_job_runner import process_single_chapter
-from worker_support.generation_batch import update_novel_status_on_finished
 from worker_support.generation_job_batch_runner import process_generate_job
-from worker_support.orphan_cleaner import cleanup_orphaned_jobs, cleanup_orphaned_jobs_periodic
+from worker_support.orphan_cleaner import cleanup_orphaned_jobs_periodic
 from worker_support.task_registry import (
     active_count,
     reap_finished,

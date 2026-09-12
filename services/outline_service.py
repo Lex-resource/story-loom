@@ -2,15 +2,13 @@ import copy
 import uuid
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func
-from models.novel import Novel, Chapter, ChapterOutline, Job, RawIssue, IssueSummary, VectorOutbox, LivingDocVersion, TokenUsage
+from sqlalchemy import select
+from models.novel import Novel, Chapter, ChapterOutline
 from models.novel_memory import NovelMemoryAtom
 from services.novel_memory_types import ATOM_STATUS_ACCEPTED, STORYLINE_MAIN
 from agents.constants import AGENT_PLANNER
 from agents.pipeline import PlannerNode
 from services.novel_constants import API_STATUS_OK
-from services.pipeline_transitions import set_chapter_pipeline_step
-from services.pipeline_types import PipelineStep
 from services.context_compaction import compact_text
 from services.project_service import get_novel_or_raise
 

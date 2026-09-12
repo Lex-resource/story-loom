@@ -184,26 +184,6 @@ async def retrieve_setting_context(
     }
 
 
-async def search_knowledge_items(
-    project_id: str,
-    query: str,
-    query_collection: QueryCollection,
-    item_type: Optional[str] = None,
-    n: int = 5,
-) -> dict:
-    where = {"type": item_type} if item_type else None
-    results = await query_collection(
-        collection_name=f"{VECTOR_COLLECTION_PREFIX}{project_id}",
-        query_texts=[query],
-        n_results=n,
-        where=where,
-    )
-    return {
-        "documents": results.get("documents", [[]])[0] if results.get("documents") else [],
-        "metadatas": results.get("metadatas", [[]])[0] if results.get("metadatas") else [],
-        "distances": results.get("distances", [[]])[0] if results.get("distances") else [],
-    }
-
 
 def _resolve_protagonist_name(
     char_map: dict[str, str],

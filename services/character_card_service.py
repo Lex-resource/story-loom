@@ -24,7 +24,6 @@ from services.character_constants import (
     CHARACTER_IMPORTANCES,
     CHARACTER_FIRST_CHAPTER,
     CHARACTER_STORYLINE_MAIN,
-    CHARACTER_RELATIONSHIP_DEFAULT_TYPE,
     normalize_character_status,
 )
 from services.character_schemas import normalize_aliases, normalize_card_data, normalize_current_state

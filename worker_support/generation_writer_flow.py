@@ -15,7 +15,7 @@ from agents.pipeline_context import PipelineContext
 from services.validator import style_quality_score
 from worker_support.chapter_repository import get_chapter_by_index
 from worker_support.context import MemoryManager
-from worker_support.generation_context import with_short_term_context, writer_query_from_outline
+from worker_support.generation_context import writer_query_from_outline
 from worker_support.generation_validator_policy import target_word_count_for
 from services.character_context import build_writer_character_context
 from services.chapter_continuity import writer_execution_brief

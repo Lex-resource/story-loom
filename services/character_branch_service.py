@@ -34,10 +34,7 @@ from services.character_constants import (
     CHARACTER_BRANCH_STATUS_READY,
     CHARACTER_BRANCH_STATUSES,
     CHARACTER_BRANCH_STORYLINE_PREFIX,
-    CHARACTER_BRANCH_SOURCE_PREFIX,
-    CHARACTER_STORYLINE_MAIN,
-)
-from services.character_manifest_service import json_checksum
+    )
 from services.character_branch_vector_service import discard_pending_branch_vectors
 from services.novel_constants import JOB_TYPE_CHARACTER_BRANCH
 from services.pipeline_types import JobStatus

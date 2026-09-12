@@ -23,8 +23,7 @@ from services.chapter_review import ChapterReviewError, apply_review_json
 from services.chapter_views import chapter_detail, chapter_list_item
 from services.experiment_publication import record_published_chapter_for_project
 
-from services.pipeline_transitions import set_chapter_pipeline_step
-from services.pipeline_types import ChapterStatus, PipelineStep
+from services.pipeline_types import ChapterStatus
 from services.novel_constants import (
     API_STATUS_DELETED,
 )

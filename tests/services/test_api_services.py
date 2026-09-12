@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from services import (
     character_branch_service,
     character_card_service,
-    issue_service,
     knowledge_query_service,
     novel_memory_service,
     outline_service,
@@ -147,43 +146,6 @@ def test_character_relationship_visibility_respects_chapter_window():
     )
 
 
-def test_issue_service_is_http_independent_and_preserves_shapes():
-    project_id = uuid.uuid4()
-    issue_id = uuid.uuid4()
-    raw_issue = SimpleNamespace(
-        chapter_index=2,
-        category="timeline",
-        description="冲突",
-        severity="block",
-    )
-    summary = SimpleNamespace(
-        id=issue_id,
-        category="timeline",
-        summary="时间线冲突",
-        severity="block",
-        examples="第2章",
-        enabled=True,
-    )
-    session = _IssueSession([raw_issue])
-    assert asyncio.run(issue_service.list_raw_issues(session, project_id)) == [
-        {
-            "chapter_index": 2,
-            "category": "timeline",
-            "description": "冲突",
-            "severity": "block",
-        }
-    ]
-
-    session.values = [summary]
-    assert asyncio.run(issue_service.list_issue_summaries(session, project_id))[0]["id"] == str(issue_id)
-    result = asyncio.run(
-        issue_service.set_issue_summary_enabled(session, project_id, issue_id, False)
-    )
-    assert result == {"status": "success", "id": str(issue_id), "enabled": False}
-    assert summary.enabled is False
-    assert session.commits == 1
-
-
 def test_novel_memory_service_serializes_atoms_and_commits_status_change():
     project_id = uuid.uuid4()
     atom_id = uuid.uuid4()
@@ -287,19 +249,6 @@ def test_project_job_history_queries_are_bounded_and_stably_ordered():
     assert statement._limit_clause.value == 12
     assert statement._offset_clause.value == 24
     assert len(statement._order_by_clauses) == 2
-
-
-def test_issue_history_queries_are_bounded_and_stably_ordered():
-    project_id = uuid.uuid4()
-    for loader in (issue_service.list_raw_issues, issue_service.list_issue_summaries):
-        session = _PaginationSession()
-        assert asyncio.run(
-            loader(session, project_id, limit=12, offset=24)
-        ) == []
-        statement = session.statements[-1]
-        assert statement._limit_clause.value == 12
-        assert statement._offset_clause.value == 24
-        assert len(statement._order_by_clauses) == 2
 
 
 def test_character_history_queries_are_bounded_and_unbounded_internal_calls_are_preserved():

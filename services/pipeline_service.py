@@ -15,8 +15,8 @@ from services.novel_constants import (
     JOB_TYPE_GENERATE,
 )
 from services.chapter_progress import find_next_writable_chapter
-from services.pipeline_transitions import StateMachine, set_chapter_pipeline_step
-from services.pipeline_types import ChapterStatus, JobStatus, NovelStatus, PipelineStep
+from services.pipeline_transitions import StateMachine
+from services.pipeline_types import JobStatus
 from services.chapter_rewrite import reset_chapter_for_rewrite
 from services.chapter_progress import is_frozen
 from services.pipeline_commands import pause_project, resume_project

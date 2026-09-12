@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, JSON, Boolean, Uuid, Float, Index, UniqueConstraint
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, JSON, Boolean, Uuid, Index, UniqueConstraint
 from sqlalchemy.orm import relationship, validates
 from core.pipeline_vocab import NovelStatus, PipelineStep
 from models.base import Base, _utcnow

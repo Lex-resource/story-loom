@@ -65,9 +65,3 @@ class KnowledgePatchSet(BaseModel):
                     normalized.append({"text": item.strip()})
             return normalized
         return v
-
-
-class KnowledgePatchSummary(BaseModel):
-    changed_categorys: list[PatchCategory] = Field(default_factory=list)
-    changed_items: list[str] = Field(default_factory=list)
-    vector_items: list[dict[str, Any]] = Field(default_factory=list)

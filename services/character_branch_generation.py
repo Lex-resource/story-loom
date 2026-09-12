@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import json
 import logging
 import uuid
 from config import settings
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,8 +19,7 @@ from services.character_branch_service import (
     create_or_get_branch_chapter,
     get_branch_chapter,
     get_character_branch,
-    transition_branch_status,
-)
+    )
 from services.character_branch_vector_service import enqueue_branch_chapter_vector
 from services.novel_memory_evidence import capture_branch_generation_evidence
 from services.novel_memory_scenes import aggregate_scene_block

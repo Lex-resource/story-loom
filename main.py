@@ -12,8 +12,6 @@ from routers import (
     chapters,
     characters,
     character_branches,
-    issues,
-    knowledge,
     knowledge_views,
     novel_memory,
     pipeline,
@@ -193,10 +191,8 @@ app.include_router(pipeline.router, prefix="/api/writing", tags=["pipeline"])
 app.include_router(chapters.router, prefix="/api/writing", tags=["chapters"])
 app.include_router(characters.router, prefix="/api/writing", tags=["characters"])
 app.include_router(character_branches.router, prefix="/api/writing", tags=["character-branches"])
-app.include_router(issues.router, prefix="/api/writing", tags=["issues"])
 app.include_router(knowledge_views.router, prefix="/api/writing", tags=["knowledge"])
 app.include_router(novel_memory.router, prefix="/api/writing", tags=["novel-memory"])
-app.include_router(knowledge.router, prefix="/api/knowledge", tags=["knowledge"])
 app.include_router(settings_router.router, prefix="/api", tags=["settings"])
 app.include_router(stream.router, prefix="/api/writing", tags=["stream"])
 app.include_router(system_configs.router, prefix="/api/system-configs", tags=["system-configs"])
@@ -220,7 +216,7 @@ async def internal_broadcast(req: InternalBroadcastRequest, request: Request):
         pass
     else:
         raise HTTPException(status_code=403, detail="Forbidden")
-    await stream_manager._deliver(req.project_id, req.event_type, req.data)
+    await stream_manager.deliver_local(req.project_id, req.event_type, req.data)
     return {"ok": True}
 
 from fastapi.staticfiles import StaticFiles

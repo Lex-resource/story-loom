@@ -1,7 +1,7 @@
 """Living-docs 内容解析器。
 
 从 services/vector_store.py 抽取，因为这些函数解析的是 living-docs 的 JSON-lines 格式，
-属于 living-docs 领域而非向量存储。vector_store / vector_retrieval / vector_settings_index
+属于 living-docs 领域而非向量存储。vector_retrieval / vector_settings_index
 均从此导入。
 """
 import json

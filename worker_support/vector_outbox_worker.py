@@ -29,7 +29,7 @@ from services.vector_constants import (
     VECTOR_UNKNOWN_CHAPTER_INDEX,
     VECTOR_UNKNOWN_ITEM_TYPE,
 )
-from services.vector_store import upsert_to_collection
+from services.vector_chroma import upsert_to_collection
 
 logger = logging.getLogger(__name__)
 

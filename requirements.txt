@@ -1,3 +1,6 @@
+# 依赖钉版的**手写源**是 pyproject.toml [project].dependencies;uv.lock 是安装事实源。
+# 本文件仅用于无 uv 的最小安装场景(pip install -r requirements.txt),
+# 更新依赖时改 pyproject 后执行 `uv export --format requirements-txt > requirements.txt`。
 fastapi==0.115.0
 uvicorn[standard]==0.30.0
 sqlalchemy[asyncio]==2.0.35

@@ -104,14 +104,6 @@ async def get_status(project_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
-@router.get("/{project_id}/jobs")
-async def get_jobs(
-    project_id: str,
-    limit: int = Query(DEFAULT_JOB_HISTORY_PAGE_SIZE, ge=1, le=MAX_JOB_HISTORY_PAGE_SIZE),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
-):
-    return await project_service.get_jobs(db, parse_project_id(project_id), limit=limit, offset=offset)
 
 
 @router.post("/{project_id}/config")
@@ -158,12 +150,6 @@ async def chat_update_outline(project_id: str, data: OutlineChatRequest, db: Asy
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
-@router.post("/{project_id}/outline/optimize")
-async def optimize_outline(project_id: str, db: AsyncSession = Depends(get_db)):
-    try:
-        return await outline_service.optimize_outline_endpoint(db, parse_project_id(project_id))
-    except LookupError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.get("/{project_id}/chapter-outlines")

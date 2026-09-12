@@ -200,9 +200,6 @@ async def remove_prompt(prompt_id: str, db=Depends(get_db)):
     return await delete_prompt_template(db, prompt_id)
 
 
-@router.get("/available-nodes", response_model=List[Dict[str, str]])
-async def get_available_nodes(db=Depends(get_db)):
-    return await list_available_nodes(db)
 
 
 # ---------------------------------------------------------------------------

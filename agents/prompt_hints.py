@@ -5,7 +5,6 @@ planner.py, writer.py, and editor.py. Each helper returns "" when the
 input is empty/falsy so callers can unconditionally pass results to
 ``safe_format`` without extra branching.
 """
-import re
 import string
 from agents.base import sanitize_untrusted_content
 

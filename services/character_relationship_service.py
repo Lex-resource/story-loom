@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.characters import CharacterCard, CharacterRelationship
 from services.character_constants import (
     CHARACTER_FIRST_CHAPTER,
-    CHARACTER_RELATIONSHIP_ACTIVE,
     CHARACTER_RELATIONSHIP_DEFAULT_STATUS,
     CHARACTER_RELATIONSHIP_DEFAULT_TYPE,
 )

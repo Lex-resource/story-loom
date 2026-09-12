@@ -81,28 +81,6 @@ async def list_models_by_provider(req: ModelsByProviderRequest):
         raise HTTPException(status_code=422, detail="API key is required")
     return await list_models_by_provider_logic(req.base_url, api_key)
 
-@router.post("/settings/test")
-async def test_connection():
-    active_provider = await get_active_provider()
 
-    if not active_provider:
-        return {"ok": False, "error": "没有配置提供商"}
 
-    req = TestProviderRequest(
-        base_url=active_provider.get("base_url", ""),
-        api_key=active_provider.get("api_key", ""),
-        model=active_provider.get("model", "")
-    )
-    return await test_provider_connection_logic(req)
 
-@router.get("/settings/models")
-async def list_available_models():
-    active_provider = await get_active_provider()
-
-    if not active_provider:
-        return {"ok": False, "error": "没有配置提供商", "models": []}
-
-    return await list_models_by_provider_logic(
-        base_url=active_provider.get("base_url", DEFAULT_LLM_BASE_URL),
-        api_key=active_provider.get("api_key", "")
-    )

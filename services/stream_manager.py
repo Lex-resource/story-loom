@@ -68,6 +68,14 @@ class StreamManager:
         except Exception:
             logger.exception("stream_forward_failed project_id=%s event_type=%s", project_id, event_type)
 
+    async def deliver_local(self, project_id: str, event_type: str, data: dict) -> None:
+        """本机直接投递,**仅供** /api/internal/broadcast 回调端点使用。
+
+        外部 worker 模式下 worker 的事件经 HTTP 回投 API,回调端点必须无条件
+        走本机投递(不能走 broadcast 的"再转发回 API"分支,会成环)。
+        """
+        await self._deliver(project_id, event_type, data)
+
     async def _deliver(self, project_id: str, event_type: str, data: dict):
         connections = self.get_connections(project_id)
         if not connections:

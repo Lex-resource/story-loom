@@ -8,7 +8,6 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agents.constants import NOVEL_FORMAT_ZHIHU_SHORT
 from agents.pipeline_context import PipelineContext
 from config import settings
 from models.novel import Chapter, Novel
@@ -28,7 +27,6 @@ from services.novel_memory_recall import (
 from services.narrative_index import format_narrative_context
 from services.pipeline_config_service import NovelFormatPolicy
 from services.short_story_context import (
-    TRUNCATION_MARKER,
     build_short_manuscript_context,
     short_block_prefix,
 )
