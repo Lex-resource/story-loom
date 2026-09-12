@@ -1,7 +1,9 @@
 # 结构问题森林(2026-09-12 全项目结构审计)
 
-> 方法:四轮扫描 —— ① 已知问题归档;② 未审区域(main/worker_support/routers/前端);③ 横切扫描
-> (重复 / 异常处理 / 魔法串 / 孤儿代码);④ 因果归并。
+> 方法:十轮扫描 —— ① 已知问题归档;② 未审区域(main/worker_support/routers/前端);③ 横切扫描
+> (重复 / 异常处理 / 魔法串 / 孤儿代码);④ 因果归并;⑤ routers 全量;⑥ services 领域
+> (N+1/域间倒挂/会话所有权);⑦ 并发与事务;⑧ 前端深扫;⑨ 工程组织;⑩ 对外暴露面。
+> ⑤-⑩ 为补充轮,产出见树 I 与"已证伪假设"。
 > 工具:AST 量化扫描、codegraph(index 4,648 节点)、定向 grep。
 > 定位法:`文件:行号` 以当日工作区为准;每个问题有唯一编号,树内因果边用 `→`(引发)与 `↔`(互相强化)。
 > 状态标记:✅ 已修复 / ⬜ 在案未修 / 🔵 记录在案但**不建议**动(有意设计或收益/风险比不划算)。
@@ -27,6 +29,7 @@
   [D 降级与吞没不可区分] ──D2 掩盖 B 的故障────────→ 支线/主链行为漂移
   [F 会话/配置所有权分散](独立,弱边)
   [G 孤儿代码] ←── 上轮修复的衍生(G1)
+  [I 数据访问与工程卫生](独立,弱边: N+1 / 依赖三源 / 私有API跨界)
   [H 前端](健康,无行动项)
 ```
 
@@ -132,6 +135,33 @@
 
 ---
 
+## 树 I · 数据访问与工程卫生(第 5-10 轮补充轮产出)
+
+| 编号 | 节点 | 位置 | 说明 | 状态 |
+|---|---|---|---|---|
+| I1 | 逐角色 N+1 | `services/chapter_deletion.py:165` | 删除章节后的角色状态回填:循环内每个 character_id 发 2 条查询(scalar + update);N=章节角色数,通常 ≤20,量级小但模式可一条 UPDATE..FROM 消灭 | ⬜ |
+| I2 | 依赖钉版三源 | `requirements.txt` + `pyproject.toml` + `uv.lock` | 前两者手工同步同一份 pin 列表,漂移风险(改一漏一);uv.lock 才是安装事实源 | ⬜ 让 pyproject 成为唯一手写源,requirements 变 `uv export` 产物或删除 |
+| I3 | 跨入私有 API | `main.py`(`stream_manager._deliver`) | 应用层调用 stream_manager 的下划线方法;应给 stream_manager 提供公共投递入口 | ⬜ 顺手 |
+| I4 | 已核对无问题的领域 | routers(除角色域)、vector 分层(retrieval/chroma/embedding/context_formatting 职责清晰)、workflow 四件套、with_for_update 抢占点、async 无阻塞调用、无 TODO/FIXME、alembic 单头 32 节点、测试按域组织、对外暴露面(internal broadcast 双闸 + WS access_control + 空 token 防绕过) | 记录为"已验干净",避免下轮审计重复追查 | 🔵 |
+
+### 已证伪的假设(防止未来审计重新追查)
+
+| 假设 | 证伪证据 |
+|---|---|
+| 记忆/章节大表存在无 LIMIT 全表查询 | 抽查 `chapter_continuity.py:521,538,547`、`chapter_publish.py:63,79` 等,全部 `scalar_one_or_none` 或 `.limit(30/120)` |
+| async 代码存在阻塞调用 | `time.sleep/requests.*` 零命中;tokenizer 重活已走 `asyncio.to_thread` |
+| services 内部延迟导入源于循环依赖 | `pipeline_config_service→chapter_graph` 等均为单向;纯粹习惯(A1) |
+| 前端存在状态混乱 | Outline 635 行 0 个 useState;Workspace 2 个 handler;realtime 收敛 2 hook |
+| 裸 `except:` 吞错 | 全库 0 处(66 处均为 `except Exception:`,其中多数为设计性降级,见树 D) |
+| TODO/FIXME 欠账 | 仅 1 处误报(提示词文案里的"XXX") |
+
+## 饱和声明
+
+第 10 轮仅产出 3 个新节点(I1-I3,均为 P3 级)+ 1 组已验干净清单(I4),且没有产生任何新的因果边或新树根。**判定扫描饱和**。当前森林 = 9 棵树、~40 个节点;剩余工作量集中在树 B(支线收编)与树 C(连续性域,需先建特征测试),两者都是"已知怎么修、只差排期"的状态。
+
+
+---
+
 ## 附录 · 完整台账(按严重度)
 
 | 级别 | 编号 | 一句话 |
@@ -147,7 +177,8 @@
 | P2 | E1 | 83 行胖路由 |
 | P2 | F1 | 会话所有权无成文约定 |
 | P3 | A3/E2/G1/G2/D2 | 模板散布 / 角色域大文件 / 孤儿类 / hint 拆分 / 静默吞错 |
-| 🔵 | D1/F3/H1 | 设计性降级 / settings 单例 / 前端展示密度(不建议动) |
+| P3 | I1/I2/I3 | 逐角色 N+1 / 依赖钉版三源 / 跨入私有 API |
+| 🔵 | D1/F3/H1/I4 | 设计性降级 / settings 单例 / 前端展示密度 / 已验干净清单(不建议动) |
 
 ## 复现扫描的命令
 
