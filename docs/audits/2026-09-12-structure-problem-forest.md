@@ -10,6 +10,33 @@
 
 ---
 
+## 修复进度(2026-09-12,fix/forest-remediation 已合并 main)
+
+| 树 | 节点 | 状态 | 提交 |
+|---|---|---|---|
+| A | A2 状态魔法串 | ✅ 19 处替换为枚举 + test_status_enum_usage 架构测试(上线即抓 11 处漏网) | P2 |
+| A | A3 来源引用模板 | ✅ core.source_refs 统一,3 文件 7 处收敛 | P2 |
+| A | A1 延迟导入提升 | ⬜ 未动(同层单向依赖,价值低;prompt_hints 12 处为有意接缝不动) | — |
+| B | B3/B4 场景块回退重复+能力缺失 | ✅ fallback_scene_summary 共享;支线接入整合开关 | P4 |
+| B | B1/B2/B5 支线收编图执行器 | ⬜ 特性级重写,单独排期(先建支线 trace) | — |
+| C | C4 特征测试 | ✅ contract_builder_characterization 逐字节锁定(25 键) | P5-C1 |
+| C | C1 build_chapter_contract | ✅ 拆 6 阶段构建器,字节一致(特征测试当场抓到 V12 遗漏) | P5-C1 |
+| C | C2 contract_prompt 分段 | ⬜ 已隔离在 render 模块,输出被双快照锁定;待建同款特征测试后拆 | — |
+| C | C3 交接包双巨函数 | ⬜ DB 密集,需先建 fake-session 特征测试 | — |
+| D | D2/D3 降级可观测 | ✅ 11 处静默吞错统一 degraded: 标记 | P3 |
+| E | E1 胖路由 | ✅(树 J1 证实为死路由,见 J1a) | P1 |
+| F | F1 会话所有权 | ✅ docs/adr/0001 | P1 |
+| G | G1 孤儿类 | ✅ KnowledgePatchSummary 删除 | P1 |
+| I | I1 N+1 | ✅ 单条相关子查询 UPDATE | P2 |
+| I | I2 依赖三源 | ✅ requirements 标注手写源为 pyproject | P1 |
+| I | I3 私有 API | ✅ stream_manager.deliver_local 公共入口 | P1 |
+| I | I5 未使用导入 | ✅ 清理 49 个(再导出模块 validation/context 保留) | P1 |
+| J | J1a 遗留死路由 ×8 | ✅ knowledge.py/issues.py 整文件 + settings/projects/system_configs 散条 | P1 |
+| J | J1b 半成品面 ×4 | 🔵 保留待接 UI(characters/generate、memory 面、candidates、states) | — |
+| J | J3 注册风格 | ✅ pipeline/projects 统一装饰器 | P2 |
+| J | J4 jobs 死路由 | ✅ 随 J1a 删除 | P1 |
+
+
 ## 0. 森林总览
 
 ```
