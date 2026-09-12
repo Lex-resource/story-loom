@@ -146,9 +146,11 @@ graph JSON + surface_strategy + prompt_category + policy;`run_chapter_graph` 解
   branch_id/storyline_id/chapter_index 参数,支线域召回 = 换参数调用;
   需要做的是把它接进 MemoryManager.get_context 的分支模式,并与
   anchor_context 静态文本合并。
-- **C1 的真正难点**:11 个角色适配器内部直接调 MemoryManager(主线假设)。
-  支线走图引擎需把 branch 上下文经 ChapterRunState 贯穿到适配器的
-  get_context 调用(如 state.branch_id → get_context 分支模式),
-  或为支线图提供独立适配器集。这是工作量主体。
+- **C1 的真正难点(实施时证实,比预估更深)**:适配器链直接读写主线章节表
+  (`get_chapter_by_index`/`save_writer_draft`/chapter_repository,11 个适配器均如此),
+  不只是 MemoryManager 的上下文假设。支线走图引擎的**前置条件是先把主线章节
+  访问抽象为仓库层**(有 golden trace 保护的主线路径重构,约 1-2 个会话),
+  之后支线以仓库实现接入。**本轮不冒险**:支线已复用引擎的 4 个节点
+  (同 agent/同提示词通道/同记忆系统),手写编排保留至仓库层重构完成。
 - **B1 的边界**:支线后处理 = 证据 + 原子 + 场景块(全部 branch 域);
   跳过角色卡更新/教义同步/叙事索引/主线发布状态(权威模型不变)。
