@@ -1028,7 +1028,7 @@ def test_await_io_work_times_out_and_releases_waiter(monkeypatch):
 
     from services import experiment_recorder as er
 
-    monkeypatch.setattr(er, "_IO_AWAIT_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(er._io, "_IO_AWAIT_TIMEOUT_SECONDS", 0.05)
 
     async def _hang():
         await asyncio.sleep(5)
@@ -1048,7 +1048,7 @@ def test_await_io_work_shield_keeps_work_running_after_timeout(monkeypatch):
     """超时后 shield 保证后台写不被取消:工作延迟完成而非丢弃。"""
     from services import experiment_recorder as er
 
-    monkeypatch.setattr(er, "_IO_AWAIT_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(er._io, "_IO_AWAIT_TIMEOUT_SECONDS", 0.05)
     completed = []
 
     async def _slow_write():
@@ -1078,7 +1078,7 @@ def test_adeactivate_flush_survives_cancellation(monkeypatch):
         _time.sleep(0.15)
         completed.append("flushed")
 
-    monkeypatch.setattr(er, "_flush_pending_writes", _slow_flush)
+    monkeypatch.setattr(er._context, "_flush_pending_writes", _slow_flush)
     # 一个永不完成的排队 future,让 adeactivate 判定"有排队写盘"走 flush 路径
     pending = concurrent.futures.Future()
     er._pending_writes.add(pending)
