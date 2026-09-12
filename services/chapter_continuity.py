@@ -502,65 +502,17 @@ def build_evidence_state_ledger(atoms: list[Any]) -> list[dict[str, Any]]:
     return sorted((value for _, value in latest.values()), key=lambda item: (item.get("source_chapter") or 0, item["memory_key"]))
 
 
-async def build_chapter_handoff(
-    db: AsyncSession,
-    project_id,
-    chapter_index: int,
+def _assemble_chapter_handoff(
     *,
-    previous_ending: str = "",
+    previous,
+    atoms: list[Any],
+    evidence_atoms: list[Any],
+    scenes: list[Any],
+    outline: dict[str, Any],
+    previous_index: int,
+    ending: str,
 ) -> ChapterHandoff:
-    previous_index = chapter_index - 1
-    if previous_index < 1:
-        return ChapterHandoff(
-            previous_chapter=0,
-            exact_ending="",
-            unknown_boundary=["这是第一章，没有可承接的上一章事实。"],
-        )
-
-    previous = await db.scalar(
-        select(Chapter).where(
-            Chapter.novel_id == project_id,
-            Chapter.chapter_index == previous_index,
-        )
-    )
-    if previous is None:
-        return ChapterHandoff(
-            previous_chapter=previous_index,
-            exact_ending=previous_ending or "",
-            unknown_boundary=["上一章记录不存在，只能使用当前可见的结尾片段。"],
-        )
-
-    outline = _as_dict(previous.outline)
-    content = previous.content or previous.edited_content or previous.draft_content or ""
-    ending = previous_ending or content[-1800:]
-
-    atoms = list((await db.scalars(
-        select(NovelMemoryAtom).where(
-            NovelMemoryAtom.project_id == project_id,
-            NovelMemoryAtom.branch_id.is_(None),
-            NovelMemoryAtom.storyline_id == STORYLINE_MAIN,
-            NovelMemoryAtom.status == ATOM_STATUS_ACCEPTED,
-            NovelMemoryAtom.source_chapter == previous_index,
-        ).order_by(NovelMemoryAtom.version.desc()).limit(30)
-    )).all())
-    evidence_atoms = list((await db.scalars(
-        select(NovelMemoryAtom).where(
-            NovelMemoryAtom.project_id == project_id,
-            NovelMemoryAtom.branch_id.is_(None),
-            NovelMemoryAtom.storyline_id == STORYLINE_MAIN,
-            NovelMemoryAtom.status == ATOM_STATUS_ACCEPTED,
-            NovelMemoryAtom.atom_type.in_(("world_rule", "character_state", "plot_thread")),
-        ).order_by(NovelMemoryAtom.source_chapter.asc(), NovelMemoryAtom.version.asc()).limit(120)
-    )).all())
-    scenes = list((await db.scalars(
-        select(NovelSceneBlock).where(
-            NovelSceneBlock.project_id == project_id,
-            NovelSceneBlock.branch_id.is_(None),
-            NovelSceneBlock.storyline_id == STORYLINE_MAIN,
-            NovelSceneBlock.source_chapter == previous_index,
-        ).order_by(NovelSceneBlock.version.desc()).limit(8)
-    )).all())
-
+    """由上一章行 + 记忆/场景行装配交接包(纯函数,DB 查询留在调用方)。"""
     end_scene = {}
     open_questions: list[Any] = []
     scene_sources: list[dict[str, Any]] = []
@@ -681,4 +633,74 @@ async def build_chapter_handoff(
             "source_ref": chapter_source_ref(previous_index),
             "chapter": previous_index,
         }],
+    )
+
+
+async def build_chapter_handoff(
+    db: AsyncSession,
+    project_id,
+    chapter_index: int,
+    *,
+    previous_ending: str = "",
+) -> ChapterHandoff:
+    previous_index = chapter_index - 1
+    if previous_index < 1:
+        return ChapterHandoff(
+            previous_chapter=0,
+            exact_ending="",
+            unknown_boundary=["这是第一章，没有可承接的上一章事实。"],
+        )
+
+    previous = await db.scalar(
+        select(Chapter).where(
+            Chapter.novel_id == project_id,
+            Chapter.chapter_index == previous_index,
+        )
+    )
+    if previous is None:
+        return ChapterHandoff(
+            previous_chapter=previous_index,
+            exact_ending=previous_ending or "",
+            unknown_boundary=["上一章记录不存在，只能使用当前可见的结尾片段。"],
+        )
+
+    outline = _as_dict(previous.outline)
+    content = previous.content or previous.edited_content or previous.draft_content or ""
+    ending = previous_ending or content[-1800:]
+
+    atoms = list((await db.scalars(
+        select(NovelMemoryAtom).where(
+            NovelMemoryAtom.project_id == project_id,
+            NovelMemoryAtom.branch_id.is_(None),
+            NovelMemoryAtom.storyline_id == STORYLINE_MAIN,
+            NovelMemoryAtom.status == ATOM_STATUS_ACCEPTED,
+            NovelMemoryAtom.source_chapter == previous_index,
+        ).order_by(NovelMemoryAtom.version.desc()).limit(30)
+    )).all())
+    evidence_atoms = list((await db.scalars(
+        select(NovelMemoryAtom).where(
+            NovelMemoryAtom.project_id == project_id,
+            NovelMemoryAtom.branch_id.is_(None),
+            NovelMemoryAtom.storyline_id == STORYLINE_MAIN,
+            NovelMemoryAtom.status == ATOM_STATUS_ACCEPTED,
+            NovelMemoryAtom.atom_type.in_(("world_rule", "character_state", "plot_thread")),
+        ).order_by(NovelMemoryAtom.source_chapter.asc(), NovelMemoryAtom.version.asc()).limit(120)
+    )).all())
+    scenes = list((await db.scalars(
+        select(NovelSceneBlock).where(
+            NovelSceneBlock.project_id == project_id,
+            NovelSceneBlock.branch_id.is_(None),
+            NovelSceneBlock.storyline_id == STORYLINE_MAIN,
+            NovelSceneBlock.source_chapter == previous_index,
+        ).order_by(NovelSceneBlock.version.desc()).limit(8)
+    )).all())
+
+    return _assemble_chapter_handoff(
+        previous=previous,
+        atoms=atoms,
+        evidence_atoms=evidence_atoms,
+        scenes=scenes,
+        outline=outline,
+        previous_index=previous_index,
+        ending=ending,
     )

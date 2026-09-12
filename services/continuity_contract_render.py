@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from services.context_compaction import compact_items, compact_json, compact_text
@@ -23,7 +22,6 @@ def contract_prompt(
     _legacy = research_override("legacy_contract_prompt", contract, agent_type=agent_type)
     if _legacy is not NO_OVERRIDE:
         return _legacy
-    import json
 
     contract = contract or {}
     # V34 assigns each context block one owner. The handoff owns inherited
@@ -69,148 +67,6 @@ def contract_prompt(
     if contract.get("interpretation_boundary_rules"):
         compact_contract["interpretation_boundary_rules"] = contract["interpretation_boundary_rules"]
     return compact_json(compact_contract, 3000, label=f"chapter_contract_{agent_type}")
-
-    contract = contract or {}
-    compact_contract = {
-        "required_events": compact_items(
-            contract.get("required_events"),
-            max_items=8,
-            item_chars=420,
-            keep="head",
-        ),
-        "continuity_from_previous": compact_items(
-            contract.get("continuity_from_previous"),
-            max_items=6,
-            item_chars=420,
-            keep="head",
-        ),
-        "state_changes": compact_items(
-            contract.get("state_changes"),
-            max_items=6,
-            item_chars=420,
-            keep="head",
-        ),
-        "foreshadowing_actions": compact_items(
-            contract.get("foreshadowing_actions"),
-            max_items=6,
-            item_chars=420,
-            keep="head",
-        ),
-        "end_state": compact_text(contract.get("end_state"), 700),
-        "new_stage_delta": compact_items(
-            contract.get("new_stage_delta"), max_items=5, item_chars=360, keep="head"
-        ),
-        "unknown_boundary": compact_items(
-            contract.get("unknown_boundary"),
-            max_items=5,
-            item_chars=360,
-            keep="head",
-        ),
-        "forbidden_deviations": compact_items(
-            contract.get("forbidden_deviations"),
-            max_items=6,
-            item_chars=360,
-            keep="head",
-        ),
-        "execution_boundaries": [
-            "unknown/candidate/generated 只能作为观察、疑问或调查线索，不得写成确认事实。",
-            "界面读取只改变可见信息；实体变化必须来自角色明确动作或保持未知。",
-            "物品/证据账本以交接包为准；账本未登记的实体状态不得补全。",
-        ],
-        "backend_boundary": (
-            "物品/证据账本、角色卡和权威等级以结构化交接包为准；"
-            "本契约只规定本章要发生的叙事动作，不要求正文复述后台字段。"
-        ),
-    }
-    extras = research_override("contract_prompt_extras", contract)
-    if extras is not NO_OVERRIDE:
-        compact_contract["previous_progress"] = extras.get("previous_progress") or {}
-    return compact_json(compact_contract, 3600, label="chapter_contract")
-
-    contract = contract or {}
-    # The handoff is the single owner of the previous-ending evidence
-    # ledgers. The chapter contract carries executable obligations only;
-    # repeating the ledgers here was the largest V9 prompt multiplier.
-    compact_contract = {
-        "required_events": compact_items(
-            contract.get("required_events"),
-            max_items=12,
-            item_chars=500,
-            keep="head",
-        ),
-        "continuity_from_previous": compact_items(
-            contract.get("continuity_from_previous"),
-            max_items=8,
-            item_chars=450,
-            keep="head",
-        ),
-        "state_changes": compact_items(
-            contract.get("state_changes"),
-            max_items=8,
-            item_chars=450,
-            keep="head",
-        ),
-        "foreshadowing_actions": compact_items(
-            contract.get("foreshadowing_actions"),
-            max_items=8,
-            item_chars=450,
-            keep="head",
-        ),
-        "end_state": compact_text(contract.get("end_state"), 900),
-        "new_stage_delta": compact_items(
-            contract.get("new_stage_delta"), max_items=5, item_chars=360, keep="head"
-        ),
-        "uncertain_events": compact_items(
-            contract.get("uncertain_events"),
-            max_items=8,
-            item_chars=450,
-            keep="head",
-        ),
-        "forbidden_deviations": compact_items(
-            contract.get("forbidden_deviations"),
-            max_items=12,
-            item_chars=450,
-            keep="head",
-        ),
-        "boundary_reference": "物品/证据账本、未知边界和权威来源以同章结构化交接包为唯一来源。",
-    }
-    compact_contract["state_boundary_rules"] = compact_items(
-        contract.get("state_boundary_rules"),
-        max_items=5,
-        item_chars=700,
-        keep="head",
-    )
-    compact_contract["claim_boundary_rules"] = compact_items(
-        contract.get("claim_boundary_rules"),
-        max_items=4,
-        item_chars=700,
-        keep="head",
-    )
-    compact_contract["evidence_surface_rules"] = compact_items(
-        contract.get("evidence_surface_rules"),
-        max_items=3,
-        item_chars=700,
-        keep="head",
-    )
-    compact_contract["evidence_surface_claims"] = compact_items(
-        contract.get("evidence_surface_claims"),
-        max_items=4,
-        item_chars=500,
-        keep="head",
-    )
-    compact_contract["item_state_rules"] = compact_items(
-        contract.get("item_state_rules"),
-        max_items=2,
-        item_chars=900,
-        keep="head",
-    )
-    return compact_json(compact_contract, 5000, label="chapter_contract")
-
-    return json.dumps(
-        contract or {},
-        ensure_ascii=False,
-        indent=2,
-    )
 
 
 def prompt_outline_for_agent(

@@ -1,0 +1,232 @@
+{
+  "with_ending": {
+    "characters_present": [
+      "林照",
+      "周岑"
+    ],
+    "completed_event_ledger": [
+      {
+        "event": "林照持有第九次潮汐记录副本",
+        "source": "accepted_memory.character_state",
+        "source_chapter": 2,
+        "status": "completed"
+      },
+      {
+        "event": "白色灯塔的真正功能尚未确认",
+        "source": "accepted_memory.foreshadowing",
+        "source_chapter": 2,
+        "status": "completed"
+      },
+      {
+        "event": "潮汐记录必须当日登记",
+        "source": "accepted_memory.world_rule",
+        "source_chapter": 2,
+        "status": "completed"
+      },
+      {
+        "event": "取得潮汐记录",
+        "source": "terminal_scene.recent_changes",
+        "source_chapter": 2,
+        "status": "completed"
+      }
+    ],
+    "end_scene": {
+      "current_state": {
+        "location": "白塔门前"
+      },
+      "recent_changes": [
+        "取得潮汐记录"
+      ],
+      "scope_key": "主线",
+      "scope_type": "plotline"
+    },
+    "evidence_boundaries": [
+      "证据的关联、相似、指向或同源迹象，不等于人物归属、亲自执行、已确认身份或已确认因果。",
+      "物品账本中的当前状态和历史转移优先于正文中的模糊回忆；不得重复开封、转移或恢复已完成的转移。",
+      "若账本没有记录某个物品的状态，只能描写观察、保管、核对或调查，不得补写持有者和操作结果。",
+      "能力、权限、中继和运行状态只代表当前证据命题；不得从一次响应推断永久能力、执行者或因果来源。",
+      "署名、来源、相似身份和时间相邻只代表证据关联；不得写成本人留下、本人执行或身份已核验。"
+    ],
+    "evidence_state_ledger": [],
+    "exact_ending": "林照停在白塔门前。",
+    "foreshadowing": [
+      "白色灯塔的真正功能尚未确认"
+    ],
+    "inherited_state": [],
+    "item_state_ledger": [],
+    "next_hook": "林照停在白塔门前。",
+    "open_questions": [
+      "设备侧回执为何延迟"
+    ],
+    "previous_chapter": 2,
+    "previous_terminal_state": {
+      "end_state": "林照停在白塔门前。",
+      "narrative_stage": "冲突升级",
+      "next_hook": "林照停在白塔门前。",
+      "scene": {
+        "current_state": {
+          "location": "白塔门前"
+        },
+        "scope_key": "主线",
+        "scope_type": "plotline"
+      }
+    },
+    "previous_title": "潮声",
+    "sources": [
+      {
+        "authority": "accepted",
+        "chapter": 2,
+        "memory_key": "key:林照持有第九次潮",
+        "source_ref": "chapter:2",
+        "type": "atom"
+      },
+      {
+        "authority": "accepted",
+        "chapter": 2,
+        "memory_key": "key:白色灯塔的真正功",
+        "source_ref": "chapter:2",
+        "type": "atom"
+      },
+      {
+        "authority": "accepted",
+        "chapter": 2,
+        "memory_key": "key:潮汐记录必须当日",
+        "source_ref": "chapter:2",
+        "type": "atom"
+      },
+      {
+        "chapter": 2,
+        "scope": "plotline/主线",
+        "source_ref": "chapter:2:scene",
+        "type": "scene_block"
+      },
+      {
+        "chapter": 2,
+        "source_ref": "chapter:2",
+        "type": "chapter"
+      }
+    ],
+    "state_changes": [
+      "林照持有第九次潮汐记录副本",
+      "潮汐记录必须当日登记"
+    ],
+    "unknown_boundary": [
+      "除交接包、角色卡、已接受记忆和本章大纲明确给出的内容外，不得推断未来事实。"
+    ]
+  },
+  "without_ending": {
+    "characters_present": [
+      "林照",
+      "周岑"
+    ],
+    "completed_event_ledger": [
+      {
+        "event": "林照持有第九次潮汐记录副本",
+        "source": "accepted_memory.character_state",
+        "source_chapter": 2,
+        "status": "completed"
+      },
+      {
+        "event": "白色灯塔的真正功能尚未确认",
+        "source": "accepted_memory.foreshadowing",
+        "source_chapter": 2,
+        "status": "completed"
+      },
+      {
+        "event": "潮汐记录必须当日登记",
+        "source": "accepted_memory.world_rule",
+        "source_chapter": 2,
+        "status": "completed"
+      },
+      {
+        "event": "取得潮汐记录",
+        "source": "terminal_scene.recent_changes",
+        "source_chapter": 2,
+        "status": "completed"
+      }
+    ],
+    "end_scene": {
+      "current_state": {
+        "location": "白塔门前"
+      },
+      "recent_changes": [
+        "取得潮汐记录"
+      ],
+      "scope_key": "主线",
+      "scope_type": "plotline"
+    },
+    "evidence_boundaries": [
+      "证据的关联、相似、指向或同源迹象，不等于人物归属、亲自执行、已确认身份或已确认因果。",
+      "物品账本中的当前状态和历史转移优先于正文中的模糊回忆；不得重复开封、转移或恢复已完成的转移。",
+      "若账本没有记录某个物品的状态，只能描写观察、保管、核对或调查，不得补写持有者和操作结果。",
+      "能力、权限、中继和运行状态只代表当前证据命题；不得从一次响应推断永久能力、执行者或因果来源。",
+      "署名、来源、相似身份和时间相邻只代表证据关联；不得写成本人留下、本人执行或身份已核验。"
+    ],
+    "evidence_state_ledger": [],
+    "exact_ending": "林照停在白塔门前,等待设备侧回执。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。",
+    "foreshadowing": [
+      "白色灯塔的真正功能尚未确认"
+    ],
+    "inherited_state": [],
+    "item_state_ledger": [],
+    "next_hook": "林照停在白塔门前。",
+    "open_questions": [
+      "设备侧回执为何延迟"
+    ],
+    "previous_chapter": 2,
+    "previous_terminal_state": {
+      "end_state": "林照停在白塔门前。",
+      "narrative_stage": "冲突升级",
+      "next_hook": "林照停在白塔门前。",
+      "scene": {
+        "current_state": {
+          "location": "白塔门前"
+        },
+        "scope_key": "主线",
+        "scope_type": "plotline"
+      }
+    },
+    "previous_title": "潮声",
+    "sources": [
+      {
+        "authority": "accepted",
+        "chapter": 2,
+        "memory_key": "key:林照持有第九次潮",
+        "source_ref": "chapter:2",
+        "type": "atom"
+      },
+      {
+        "authority": "accepted",
+        "chapter": 2,
+        "memory_key": "key:白色灯塔的真正功",
+        "source_ref": "chapter:2",
+        "type": "atom"
+      },
+      {
+        "authority": "accepted",
+        "chapter": 2,
+        "memory_key": "key:潮汐记录必须当日",
+        "source_ref": "chapter:2",
+        "type": "atom"
+      },
+      {
+        "chapter": 2,
+        "scope": "plotline/主线",
+        "source_ref": "chapter:2:scene",
+        "type": "scene_block"
+      },
+      {
+        "chapter": 2,
+        "source_ref": "chapter:2",
+        "type": "chapter"
+      }
+    ],
+    "state_changes": [
+      "林照持有第九次潮汐记录副本",
+      "潮汐记录必须当日登记"
+    ],
+    "unknown_boundary": [
+      "除交接包、角色卡、已接受记忆和本章大纲明确给出的内容外，不得推断未来事实。"
+    ]
+  }
+}
