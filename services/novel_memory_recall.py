@@ -7,11 +7,10 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.novel_memory import NovelMemoryAtom, NovelSceneBlock, ProjectDoctrine
-from config import settings
 from services.context_compaction import compact_text, context_budget_for
 from services.novel_memory_types import (
     ATOM_STATUS_ACCEPTED,
@@ -40,51 +39,92 @@ class RecallBudget:
     candidate_limit: int = 4
 
 
+@dataclass(frozen=True)
+class AgentRecallProfile:
+    """单个 agent 角色的全部召回配置。
+
+    召回预算、向量建议、类型白名单此前散落在 5 个平级 dict + memory_manager
+    的内联 dict 里,新增角色要改 6 处;现在收进一张表 —— 新增角色只加一行,
+    完整性由 tests/services/test_agent_recall_profiles.py 守恒。
+    """
+
+    budget: RecallBudget
+    hybrid_vector_limit: int
+    hybrid_vector_sources: tuple[str, ...]
+    atom_types: tuple[str, ...]
+    scene_types: tuple[str, ...]
+    narrative_index_chars: int
+
+
+AGENT_RECALL_PROFILES: dict[str, AgentRecallProfile] = {
+    "planner": AgentRecallProfile(
+        budget=RecallBudget(8, 6, 12, 4, 9000),
+        hybrid_vector_limit=4,
+        hybrid_vector_sources=("scene_block",),
+        atom_types=("plot_thread", "foreshadowing", "character_state"),
+        scene_types=("plotline", "character_arc"),
+        narrative_index_chars=1000,
+    ),
+    "writer": AgentRecallProfile(
+        budget=RecallBudget(4, 4, 8, 3, 6500),
+        hybrid_vector_limit=4,
+        hybrid_vector_sources=("scene_block", "chapter_extract"),
+        atom_types=("world_rule", "character_state", "foreshadowing"),
+        scene_types=("plotline", "character_arc"),
+        narrative_index_chars=800,
+    ),
+    "editor": AgentRecallProfile(
+        budget=RecallBudget(4, 4, 10, 3, 7000),
+        hybrid_vector_limit=3,
+        hybrid_vector_sources=("scene_block", "chapter_extract"),
+        atom_types=("world_rule", "character_state", "foreshadowing", "plot_thread"),
+        scene_types=("plotline", "character_arc"),
+        narrative_index_chars=800,
+    ),
+    "validator": AgentRecallProfile(
+        budget=RecallBudget(6, 6, 16, 6, 10000),
+        hybrid_vector_limit=4,
+        hybrid_vector_sources=("scene_block", "chapter_extract"),
+        atom_types=("world_rule", "character_state", "foreshadowing", "plot_thread"),
+        scene_types=("plotline", "character_arc"),
+        narrative_index_chars=900,
+    ),
+    "extractor": AgentRecallProfile(
+        budget=RecallBudget(4, 3, 12, 4, 7000),
+        hybrid_vector_limit=3,
+        hybrid_vector_sources=("scene_block", "chapter_extract"),
+        atom_types=("world_rule", "character_state", "foreshadowing", "plot_thread"),
+        scene_types=("plotline", "character_arc"),
+        narrative_index_chars=600,
+    ),
+}
+_DEFAULT_PROFILE_AGENT = "writer"
+
+# 兼容旧名:测试与外部代码仍按 agent->dict 的形状导入。
 RECALL_BUDGETS: dict[str, RecallBudget] = {
-    "planner": RecallBudget(8, 6, 12, 4, 9000),
-    "writer": RecallBudget(4, 4, 8, 3, 6500),
-    "editor": RecallBudget(4, 4, 10, 3, 7000),
-    "validator": RecallBudget(6, 6, 16, 6, 10000),
-    "extractor": RecallBudget(4, 3, 12, 4, 7000),
+    name: profile.budget for name, profile in AGENT_RECALL_PROFILES.items()
+}
+HYBRID_VECTOR_LIMITS: dict[str, int] = {
+    name: profile.hybrid_vector_limit for name, profile in AGENT_RECALL_PROFILES.items()
+}
+HYBRID_VECTOR_SOURCES: dict[str, set[str]] = {
+    name: set(profile.hybrid_vector_sources) for name, profile in AGENT_RECALL_PROFILES.items()
+}
+_AGENT_ATOM_TYPES: dict[str, set[str]] = {
+    name: set(profile.atom_types) for name, profile in AGENT_RECALL_PROFILES.items()
+}
+_AGENT_SCENE_TYPES: dict[str, set[str]] = {
+    name: set(profile.scene_types) for name, profile in AGENT_RECALL_PROFILES.items()
 }
 
 # A4 uses a larger deterministic PostgreSQL candidate pool, then ranks the
 # bounded rows locally. This keeps the query portable and avoids a schema or
 # model-call dependency while still escaping the old "latest rows only" bias.
 LEXICAL_RECALL_POOL_MULTIPLIER = 4
-HYBRID_VECTOR_LIMITS: dict[str, int] = {
-    "planner": 4,
-    "writer": 4,
-    "editor": 3,
-    "validator": 4,
-    "extractor": 3,
-}
-HYBRID_VECTOR_SOURCES: dict[str, set[str]] = {
-    "planner": {"scene_block"},
-    "writer": {"scene_block", "chapter_extract"},
-    "editor": {"scene_block", "chapter_extract"},
-    "validator": {"scene_block", "chapter_extract"},
-    "extractor": {"scene_block", "chapter_extract"},
-}
 
-_AGENT_ATOM_TYPES: dict[str, set[str]] = {
-    # Planner needs the trajectory and promises that shape the next outline.
-    "planner": {"plot_thread", "foreshadowing", "character_state"},
-    # Writer needs hard setting facts and the state of characters who may act.
-    "writer": {"world_rule", "character_state", "foreshadowing"},
-    # Review agents should see the broadest accepted fact set.
-    "editor": {"world_rule", "character_state", "foreshadowing", "plot_thread"},
-    "validator": {"world_rule", "character_state", "foreshadowing", "plot_thread"},
-    # Extractor needs the prior state categories it is about to update.
-    "extractor": {"world_rule", "character_state", "foreshadowing", "plot_thread"},
-}
-_AGENT_SCENE_TYPES: dict[str, set[str]] = {
-    "planner": {"plotline", "character_arc"},
-    "writer": {"plotline", "character_arc"},
-    "editor": {"plotline", "character_arc"},
-    "validator": {"plotline", "character_arc"},
-    "extractor": {"plotline", "character_arc"},
-}
+
+def profile_for(agent_type: str) -> AgentRecallProfile:
+    return AGENT_RECALL_PROFILES.get(agent_type, AGENT_RECALL_PROFILES[_DEFAULT_PROFILE_AGENT])
 
 
 @dataclass
@@ -95,6 +135,9 @@ class NovelMemoryRecall:
     due_atoms: list[NovelMemoryAtom]
     candidate_atoms: list[NovelMemoryAtom]
     context: str
+    # 本次实际注入 prompt 的 atom 清单 —— 命中簿记由调用方
+    # (memory_manager → lifecycle.record_recall_hits)落库,recall 自身保持只读。
+    injected_atoms: list[NovelMemoryAtom] | None = None
 
 
 async def _retrieve_vector_advisory_context(
@@ -106,11 +149,9 @@ async def _retrieve_vector_advisory_context(
     """Retrieve only advisory historical projections from the project Chroma collection."""
     if not str(query_text or "").strip():
         return ""
-    allowed_sources = HYBRID_VECTOR_SOURCES.get(
-        agent_type,
-        HYBRID_VECTOR_SOURCES["writer"],
-    )
-    result_limit = HYBRID_VECTOR_LIMITS.get(agent_type, HYBRID_VECTOR_LIMITS["writer"])
+    profile = profile_for(agent_type)
+    allowed_sources = profile.hybrid_vector_sources
+    result_limit = profile.hybrid_vector_limit
     try:
         # Import lazily so PostgreSQL-only unit tests do not initialize Chroma.
         from services.vector_chroma import has_collection_documents, query_collection
@@ -171,40 +212,12 @@ async def _retrieve_vector_advisory_context(
 
 
 def budget_for(agent_type: str) -> RecallBudget:
-    return RECALL_BUDGETS.get(agent_type, RECALL_BUDGETS["writer"])
+    return profile_for(agent_type).budget
 
 
-async def _record_recall_hits(db: AsyncSession, chapter_index: int, items: list[Any]) -> None:
-    """Best-effort hit bookkeeping for the candidate lifecycle sweep.
-
-    Recall is advisory, so bookkeeping must never break it: every failure is
-    logged and swallowed. The sweep in services.novel_memory_lifecycle reads
-    these counters later; nothing here changes what agents see in context.
-    """
-    if not settings.ENABLE_RECALL_HIT_TRACKING:
-        return
-    ids: list[Any] = []
-    seen: set[Any] = set()
-    for item in items:
-        item_id = getattr(item, "id", None)
-        if item_id is None or item_id in seen:
-            continue
-        seen.add(item_id)
-        ids.append(item_id)
-    if not ids:
-        return
-    try:
-        await db.execute(
-            update(NovelMemoryAtom)
-            .where(NovelMemoryAtom.id.in_(ids))
-            .values(
-                recall_use_count=NovelMemoryAtom.recall_use_count + 1,
-                last_recalled_chapter=chapter_index,
-            )
-            .execution_options(synchronize_session=False)
-        )
-    except Exception:
-        logger.warning("novel_memory_recall_hit_tracking_failed", exc_info=True)
+def narrative_index_chars_for(agent_type: str) -> int:
+    """叙事索引的 per-agent 字符预算(单一来源:AgentRecallProfile)。"""
+    return profile_for(agent_type).narrative_index_chars
 
 
 async def recall_novel_memory(
@@ -320,7 +333,6 @@ async def recall_novel_memory(
             for item in (*atoms, *due_atoms, *candidate_atoms)
             if str(getattr(item, "memory_key", "") or "")
         ]
-        await _record_recall_hits(db, chapter_index, [*atoms, *due_atoms, *candidate_atoms])
         from services.experiment_recorder import record_event
 
         record_event(
@@ -352,6 +364,7 @@ async def recall_novel_memory(
                 candidate_atoms=candidate_atoms,
                 hybrid_context=hybrid_context,
             ),
+            injected_atoms=[*atoms, *due_atoms, *candidate_atoms],
         )
     except Exception:
         logger.exception(

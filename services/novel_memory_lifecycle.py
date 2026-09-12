@@ -18,6 +18,7 @@ import uuid
 from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from models.novel_memory import NovelMemoryAtom
 from services.novel_memory_types import (
     ATOM_STATUS_CANDIDATE,
@@ -28,6 +29,38 @@ from services.novel_memory_types import (
 logger = logging.getLogger(__name__)
 
 LIFECYCLE_SWEEP_SOURCE = "system:candidate_lifecycle"
+
+
+async def record_recall_hits(db: AsyncSession, chapter_index: int, items: list) -> None:
+    """Best-effort hit bookkeeping for the candidate lifecycle sweep.
+
+    由调用方(memory_manager)在 recall 之后落库 —— recall 自身保持只读。
+    簿记永远不抛错:任何失败只记日志,不影响生成主流程。
+    """
+    if not settings.ENABLE_RECALL_HIT_TRACKING:
+        return
+    ids: list = []
+    seen: set = set()
+    for item in items:
+        item_id = getattr(item, "id", None)
+        if item_id is None or item_id in seen:
+            continue
+        seen.add(item_id)
+        ids.append(item_id)
+    if not ids:
+        return
+    try:
+        await db.execute(
+            update(NovelMemoryAtom)
+            .where(NovelMemoryAtom.id.in_(ids))
+            .values(
+                recall_use_count=NovelMemoryAtom.recall_use_count + 1,
+                last_recalled_chapter=chapter_index,
+            )
+            .execution_options(synchronize_session=False)
+        )
+    except Exception:
+        logger.warning("novel_memory_recall_hit_tracking_failed", exc_info=True)
 
 
 async def sweep_stale_atom_candidates(

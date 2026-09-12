@@ -20,7 +20,11 @@ from services.novel_constants import (
     SHORT_MANUSCRIPT_CONTEXT_MAX_CHARS,
     SHORT_TERM_MEMORY_WINDOW,
 )
-from services.novel_memory_recall import merge_layered_context, recall_novel_memory
+from services.novel_memory_recall import (
+    merge_layered_context,
+    narrative_index_chars_for,
+    recall_novel_memory,
+)
 from services.narrative_index import format_narrative_context
 from services.pipeline_config_service import NovelFormatPolicy
 from services.short_story_context import (
@@ -338,6 +342,11 @@ class MemoryManager:
                     and not _hybrid_recall_suppressed()
                 ),
             )
+            if recall.injected_atoms:
+                # 命中簿记在调用方落库:recall 保持只读,簿记失败不抛错。
+                from services.novel_memory_lifecycle import record_recall_hits
+
+                await record_recall_hits(db, chapter_index, recall.injected_atoms)
             return recall.context
         return ""
     @staticmethod
@@ -366,13 +375,7 @@ class MemoryManager:
         )).all())
         return format_narrative_context(
             rows,
-            max_chars={
-                "planner": 1000,
-                "writer": 800,
-                "editor": 800,
-                "validator": 900,
-                "extractor": 600,
-            }.get(agent_type, 800),
+            max_chars=narrative_index_chars_for(agent_type),
             agent_type=agent_type,
         )
 
