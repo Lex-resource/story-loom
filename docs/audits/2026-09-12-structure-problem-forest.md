@@ -30,6 +30,7 @@
   [F 会话/配置所有权分散](独立,弱边)
   [G 孤儿代码] ←── 上轮修复的衍生(G1)
   [I 数据访问与工程卫生](独立,弱边: N+1 / 依赖三源 / 私有API跨界)
+  [J API面与UI漂移] ←── 删UI不删路由 / 无契约测试 → 孤儿路由累积(J1);反向:后端建好等UI(J2)
   [H 前端](健康,无行动项)
 ```
 
@@ -155,9 +156,26 @@
 | 裸 `except:` 吞错 | 全库 0 处(66 处均为 `except Exception:`,其中多数为设计性降级,见树 D) |
 | TODO/FIXME 欠账 | 仅 1 处误报(提示词文案里的"XXX") |
 
-## 饱和声明
+## 树 J · API 面与 UI 漂移(第 11 轮:前后端契约比对产出)
 
-第 10 轮仅产出 3 个新节点(I1-I3,均为 P3 级)+ 1 组已验干净清单(I4),且没有产生任何新的因果边或新树根。**判定扫描饱和**。当前森林 = 9 棵树、~40 个节点;剩余工作量集中在树 B(支线收编)与树 C(连续性域,需先建特征测试),两者都是"已知怎么修、只差排期"的状态。
+**根因**:删前端组件时不清理对应后端路由,后端能力建了也不接 UI——项目没有"路由 ↔ 调用"双向对照测试,漂移不可见。方法:兼容装饰器与 `add_api_route` 两种注册风格,提取 78 条后端路由,对前端 54 个 `requestJson` 调用点双向归一化比对,再逐条 grep 复核。
+
+| 编号 | 节点 | 位置 | 说明 | 状态 |
+|---|---|---|---|---|
+| J1 | **死路由 ×11,含 83 行胖路由本身** | `routers/characters.py` `POST /characters/generate` 等 | grep 复核前端零引用:`characters/generate`(E1 的 83 行提取策略**整个没有 UI 入口**——角色卡 AI 建卡实际走 extractor 自动建卡,手工入口从未接)、`community-summary`、`issue-summaries`(+toggle)、`raw-issues`、`outline/optimize`、`knowledge/{id}/search`(knowledge.py 唯一路由 = 整文件死)、`settings/models`+`settings/test`、`system-configs/available-nodes`、`branches/candidates`、`characters/{}/states/{}` | ⬜ 删除或接 UI,二选一 |
+| J2 | 半成品 API 面 | `routers/novel_memory.py` 全部 6 条(`memory/summary|evidence|atoms|scenes|doctrines` + PATCH 状态) | 分层记忆的浏览/人工核准 UI 从未建过;后端面完整却零消费 | ⬜ 产品决策:补 UI 或明确废弃 |
+| J3 | 注册风格不一致 | `routers/pipeline.py`(3 装饰器 + 1 add_api_route)、`projects.py`(11 + 1) | 同文件混两种注册风格;`add_api_route` 会绕过常规装饰器扫描(本次审计初版就因此漏了 7 条路由) | ⬜ 统一为装饰器 |
+| J4 | jobs 列表路由无消费 | `GET /api/writing/{}/jobs` | worker 控制面已迁到 `/api/worker/*`,这条是旧面 | ⬜ |
+
+**因果**:删 UI(IssuesPanel/CommunitySummaryView)→ 路由成孤儿(J1);无双向契约测试 → 孤儿不可见 → 持续累积;反向:memory 后端建好等 UI(J2)→ 半成品面悬挂。与树 G 同根(孤儿代码的 API 版);**E1 因此升级:又胖又死**。
+
+**误报记录(下次审计别再追)**:`/api/writing/{}/status`、`{}/chapters`、`{}/chapter-outlines`、system-configs 的 default-graph/prompts —— 前端经 `useProjectData.js` 与 `${query}` 模板串调用,首轮提取漏计,已人工复核为**在用**。
+
+---
+
+## 饱和声明(第 11 轮修订)
+
+第 10 轮的饱和判定**只对结构维度成立**;第 11 轮换方法(前后端契约语义比对)立即产出树 J,证明"换维度就有新发现"。本轮把 78 条后端路由逐条三角化(装饰器/add_api_route/前端调用/grep 复核),**API 维度现已饱和**。全森林 = 10 棵树、~50 节点。
 
 
 ---
@@ -174,8 +192,9 @@
 | P2 | A1 | ~30 处习惯性延迟导入 |
 | P2 | A2 | 12 处状态魔法串绕过枚举 |
 | P2 | C2 | 渲染 f-string 巨块(196 行) |
-| P2 | E1 | 83 行胖路由 |
+| P2 | E1 | 83 行胖路由(树 J1 证实:同时是死代码) |
 | P2 | F1 | 会话所有权无成文约定 |
+| P2 | J1/J2 | 死路由 ×11 + 半成品记忆 API 面 |
 | P3 | A3/E2/G1/G2/D2 | 模板散布 / 角色域大文件 / 孤儿类 / hint 拆分 / 静默吞错 |
 | P3 | I1/I2/I3 | 逐角色 N+1 / 依赖钉版三源 / 跨入私有 API |
 | 🔵 | D1/F3/H1/I4 | 设计性降级 / settings 单例 / 前端展示密度 / 已验干净清单(不建议动) |
