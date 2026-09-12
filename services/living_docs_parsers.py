@@ -32,7 +32,8 @@ def parse_character_state(content: str) -> list[tuple[str, str]]:
                 for item in items
             ]
     except Exception:
-        pass
+
+        logger.debug("degraded:living_docs.markdown_extract", exc_info=True)
 
     parsed_items = _parse_json_items(content)
     if parsed_items is not None:

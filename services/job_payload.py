@@ -4,6 +4,8 @@ import json
 from typing import Any, Optional
 
 from services.pipeline_types import JobStatus
+import logging
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +55,8 @@ def _read_error_dict(job) -> dict[str, Any]:
             if isinstance(parsed, dict):
                 return parsed
         except Exception:
-            pass
+
+            logger.debug("degraded:job_payload.params_not_json", exc_info=True)
         return {"error": raw}
     return {"error": str(raw)}
 
@@ -146,7 +149,8 @@ def get_job_params(job) -> dict[str, Any]:
             if isinstance(parsed, dict):
                 return parsed
         except Exception:
-            pass
+
+            logger.debug("degraded:job_payload.legacy_params_not_json", exc_info=True)
     # Legacy fallback: some old rows stored structured context in job.error.
     # Do not rely on this for new writes.
     error_dict = _read_error_dict(job)

@@ -14,6 +14,8 @@ from worker_support.chapter_repository import (
 from worker_support.events import GenerationEvents
 from worker_support.generation_context import append_user_intervention
 from services.continuity_contract import sanitize_outline_for_contract
+import logging
+logger = logging.getLogger(__name__)
 
 def normalize_outline_data(outline: dict) -> dict:
     """Normalize planner-returned outline dict into a consistent shape."""
@@ -37,7 +39,7 @@ def normalize_outline_data(outline: dict) -> dict:
                     if "emotional_arc" not in outline or not outline["emotional_arc"]:
                         outline["emotional_arc"] = value.strip().strip('"').strip("'").strip('\\"')
                 except Exception:
-                    pass
+                    logger.debug("degraded:generation_outline.event_split", exc_info=True)
                 continue
             cleaned_key_events.append(event)
         else:
@@ -72,7 +74,7 @@ def normalize_outline_data(outline: dict) -> dict:
         try:
             outline["chapter_index"] = int(outline["chapter_index"])
         except Exception:
-            pass
+            logger.debug("degraded:generation_outline.character_goal_parse", exc_info=True)
 
     return outline
 

@@ -106,7 +106,7 @@ class StreamManager:
             try:
                 await ws.close(code=1011)
             except Exception:
-                pass
+                logger.debug("degraded:stream_manager.close_on_kick", exc_info=True)
         except Exception:
             logger.info("stream_client_disconnected project_id=%s", project_id)
             self.unregister_connection(project_id, ws)

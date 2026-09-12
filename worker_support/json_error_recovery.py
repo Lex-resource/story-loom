@@ -21,6 +21,8 @@ from worker_support.chapter_repository import get_or_create_chapter
 from worker_support.events import GenerationEvents
 from services.knowledge_merger import run_post_processing
 from core.pipeline_vocab import ChapterStatus
+import logging
+logger = logging.getLogger(__name__)
 
 
 class JSONErrorRecoveryOutcome(StrEnum):
@@ -124,7 +126,8 @@ async def _schedule_editor_schema_rewrite(
             "Editor结构化输出缺少必需字段，未强制保存；正在自动重写正文并重新审校。",
         )
     except Exception:
-        pass
+
+        logger.debug("degraded:json_recovery.strategy_failed", exc_info=True)
 
 
 async def _fail_after_editor_schema_rewrite(
@@ -155,7 +158,8 @@ async def _fail_after_editor_schema_rewrite(
             "Editor结构化输出在自动重写后仍不完整，未强制保存，已暂停等待人工处理。",
         )
     except Exception:
-        pass
+
+        logger.debug("degraded:json_recovery.strategy_failed", exc_info=True)
 
 
 async def _mark_retry(
@@ -189,7 +193,8 @@ async def _mark_retry(
             f"智能体输出数据验证失败，正在自动重试修复（第 {retry_count}/3 次）。",
         )
     except Exception:
-        pass
+
+        logger.debug("degraded:json_recovery.strategy_failed", exc_info=True)
 
 
 async def _force_save_usable_text(
@@ -243,4 +248,5 @@ async def _fail_without_usable_text(
             "智能体输出数据验证失败，已自动重试但没有可用正文可保存。",
         )
     except Exception:
-        pass
+
+        logger.debug("degraded:json_recovery.strategy_failed", exc_info=True)

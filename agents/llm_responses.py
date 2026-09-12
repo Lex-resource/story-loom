@@ -135,7 +135,8 @@ async def _raise_stream_http_error(response) -> None:
     try:
         await response.aread()
     except Exception:
-        pass
+
+        logger.debug("degraded:llm_responses.error_body_read", exc_info=True)
     status = getattr(response, "status_code", "unknown")
     detail = _preview(getattr(response, "text", ""))
     raise ValueError(f"LLM API HTTP {status}: {detail or 'empty response'}")
