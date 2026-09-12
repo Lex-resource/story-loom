@@ -132,3 +132,23 @@ graph JSON + surface_strategy + prompt_category + policy;`run_chapter_graph` 解
 
 行为对齐说明:手写版只有场景块写入支线域;新版按本计划补齐证据+原子,
 这是**有意的功能增强**(用户明确要求"相同的记忆系统撑着"),非遗留行为变更。
+
+### 实施备注(已核实,2026-09-12)
+
+- **A1 已确认零成本**:`capture_chapter_extractor_evidence` 与 `record_patch_atoms`
+  签名原生支持 `branch_id`/`storyline_id`,且 evidence 层已有支线专用
+  source_ref 模板(`character_branch:{branch_id}:chapter:{n}:generation`)。
+  支线域记忆写入不需要改写函数,只需调用方传参。
+- **锚点快照已存在**:支线创建时 `branch.anchor_context` 已冻结主线记忆
+  (角色卡/历史文档/锚点结尾),手写版 `_branch_context` 就是消费它的。
+  "28 章之前的记忆"无需新做,直接沿用。
+- **A2 的缺口只在"支线自身累积记忆"**:`recall_novel_memory` 已支持
+  branch_id/storyline_id/chapter_index 参数,支线域召回 = 换参数调用;
+  需要做的是把它接进 MemoryManager.get_context 的分支模式,并与
+  anchor_context 静态文本合并。
+- **C1 的真正难点**:11 个角色适配器内部直接调 MemoryManager(主线假设)。
+  支线走图引擎需把 branch 上下文经 ChapterRunState 贯穿到适配器的
+  get_context 调用(如 state.branch_id → get_context 分支模式),
+  或为支线图提供独立适配器集。这是工作量主体。
+- **B1 的边界**:支线后处理 = 证据 + 原子 + 场景块(全部 branch 域);
+  跳过角色卡更新/教义同步/叙事索引/主线发布状态(权威模型不变)。
