@@ -259,6 +259,99 @@ async def _run_v54_local_action_repair(
     return repaired
 
 
+async def _revalidate_repaired(
+    db: AsyncSession,
+    novel,
+    chapter_index: int,
+    chapter,
+    outline_data: dict,
+    memory_context: dict,
+    repaired: str,
+    validator_agent,
+    on_validator_chunk,
+    events: GenerationEvents,
+) -> dict:
+    """局部修复后的复核校验:完整 validator 重跑 + 前端消息。"""
+    repaired_result = await run_context_comprehensive_validation(
+        db,
+        novel,
+        chapter_index,
+        chapter.title or outline_data.get("title", f"第{chapter_index}章"),
+        repaired,
+        memory_context["previous_ending"],
+        memory_context,
+        validator_agent,
+        on_validator_chunk=on_validator_chunk,
+    )
+    await events.validator_messages(repaired_result, chapter_index)
+    return repaired_result
+
+
+def _accepted_outcome(
+    repaired_result: dict,
+    draft_content: str | None,
+    repaired: str | None,
+    rewrite_count: int,
+    a5_polisher_used: bool,
+) -> PostEditValidationOutcome:
+    return PostEditValidationOutcome(
+        validator_result=repaired_result,
+        draft_content=draft_content,
+        edited_content=repaired,
+        rewrite_count=rewrite_count,
+        decision="proceed",
+        validation_errors="",
+        should_continue=False,
+        a5_polisher_used=a5_polisher_used,
+    )
+
+
+async def _commit_accepted_repair(
+    db: AsyncSession,
+    novel,
+    chapter_index: int,
+    chapter,
+    rewrite_count: int,
+    raw_issues: list,
+) -> None:
+    """修复稿通过复核后的收尾:标记成功、留档 issue、提交。"""
+    mark_editor_success(chapter, rewrite_count)
+    await save_editor_raw_issues(db, novel.id, chapter_index, raw_issues)
+    await db.commit()
+
+
+async def _terminal_block_outcome(
+    db: AsyncSession,
+    novel,
+    chapter_index: int,
+    chapter,
+    events: GenerationEvents,
+    validator_result: dict,
+    validation_errors: str,
+    rewrite_count: int,
+    draft_content: str | None,
+    edited_content: str | None,
+    a5_polisher_used: bool,
+    reason: str,
+) -> PostEditValidationOutcome:
+    """重写预算耗尽后的停机:置 terminal_block、暂停章节,不强制发布。"""
+    validator_result["terminal_block"] = True
+    chapter.status = "draft"
+    chapter.error = validation_errors
+    await db.commit()
+    await events.status(AGENT_VALIDATOR, chapter_index, reason)
+    return PostEditValidationOutcome(
+        validator_result=validator_result,
+        draft_content=draft_content,
+        edited_content=edited_content,
+        rewrite_count=rewrite_count,
+        decision="blocked",
+        validation_errors=validation_errors,
+        should_continue=False,
+        a5_polisher_used=a5_polisher_used,
+    )
+
+
 async def run_post_edit_validation(
     db: AsyncSession,
     novel,
@@ -320,32 +413,13 @@ async def run_post_edit_validation(
                 repair_plan,
                 on_editor_chunk=on_editor_chunk,
             )
-            repaired_result = await run_context_comprehensive_validation(
-                db,
-                novel,
-                chapter_index,
-                chapter.title or outline_data.get("title", f"第{chapter_index}章"),
-                repaired,
-                memory_context["previous_ending"],
-                memory_context,
-                validator_agent,
-                on_validator_chunk=on_validator_chunk,
+            repaired_result = await _revalidate_repaired(
+                db, novel, chapter_index, chapter, outline_data, memory_context,
+                repaired, validator_agent, on_validator_chunk, events,
             )
-            await events.validator_messages(repaired_result, chapter_index)
             if repaired_result.get("passed"):
-                mark_editor_success(chapter, rewrite_count)
-                await save_editor_raw_issues(db, novel.id, chapter_index, raw_issues)
-                await db.commit()
-                return PostEditValidationOutcome(
-                    validator_result=repaired_result,
-                    draft_content=draft_content,
-                    edited_content=repaired,
-                    rewrite_count=rewrite_count,
-                    decision="proceed",
-                    validation_errors="",
-                    should_continue=False,
-                    a5_polisher_used=a5_polisher_used,
-                )
+                await _commit_accepted_repair(db, novel, chapter_index, chapter, rewrite_count, raw_issues)
+                return _accepted_outcome(repaired_result, draft_content, repaired, rewrite_count, a5_polisher_used)
             validator_result = repaired_result
             contents = apply_cleaned_content(
                 repaired_result,
@@ -377,32 +451,13 @@ async def run_post_edit_validation(
                 action_plan,
                 on_editor_chunk=on_editor_chunk,
             )
-            repaired_result = await run_context_comprehensive_validation(
-                db,
-                novel,
-                chapter_index,
-                chapter.title or outline_data.get("title", f"第{chapter_index}章"),
-                repaired,
-                memory_context["previous_ending"],
-                memory_context,
-                validator_agent,
-                on_validator_chunk=on_validator_chunk,
+            repaired_result = await _revalidate_repaired(
+                db, novel, chapter_index, chapter, outline_data, memory_context,
+                repaired, validator_agent, on_validator_chunk, events,
             )
-            await events.validator_messages(repaired_result, chapter_index)
             if repaired_result.get("passed"):
-                mark_editor_success(chapter, rewrite_count)
-                await save_editor_raw_issues(db, novel.id, chapter_index, raw_issues)
-                await db.commit()
-                return PostEditValidationOutcome(
-                    validator_result=repaired_result,
-                    draft_content=draft_content,
-                    edited_content=repaired,
-                    rewrite_count=rewrite_count,
-                    decision="proceed",
-                    validation_errors="",
-                    should_continue=False,
-                    a5_polisher_used=a5_polisher_used,
-                )
+                await _commit_accepted_repair(db, novel, chapter_index, chapter, rewrite_count, raw_issues)
+                return _accepted_outcome(repaired_result, draft_content, repaired, rewrite_count, a5_polisher_used)
             validator_result = repaired_result
             contents = apply_cleaned_content(
                 repaired_result,
@@ -426,20 +481,13 @@ async def run_post_edit_validation(
                 memory_context,
                 draft_content,
                 edited_content,
-                issue_summaries,
+                memory_context.get("issue_summaries", ""),
                 validator_result,
                 on_chunk=on_editor_chunk,
             )
-            repaired_result = await run_context_comprehensive_validation(
-                db,
-                novel,
-                chapter_index,
-                chapter.title or outline_data.get("title", f"第{chapter_index}章"),
-                repaired,
-                memory_context["previous_ending"],
-                memory_context,
-                validator_agent,
-                on_validator_chunk=on_validator_chunk,
+            repaired_result = await _revalidate_repaired(
+                db, novel, chapter_index, chapter, outline_data, memory_context,
+                repaired, validator_agent, on_validator_chunk, events,
             )
             _record_quality_role(
                 "critic",
@@ -447,19 +495,8 @@ async def run_post_edit_validation(
                 passed=bool(repaired_result.get("passed")),
             )
             if repaired_result.get("passed"):
-                mark_editor_success(chapter, rewrite_count)
-                await save_editor_raw_issues(db, novel.id, chapter_index, raw_issues)
-                await db.commit()
-                return PostEditValidationOutcome(
-                    validator_result=repaired_result,
-                    draft_content=draft_content,
-                    edited_content=repaired,
-                    rewrite_count=rewrite_count,
-                    decision="proceed",
-                    validation_errors="",
-                    should_continue=False,
-                    a5_polisher_used=True,
-                )
+                await _commit_accepted_repair(db, novel, chapter_index, chapter, rewrite_count, raw_issues)
+                return _accepted_outcome(repaired_result, draft_content, repaired, rewrite_count, a5_polisher_used=True)
             a5_polisher_used = True
             validator_result = repaired_result
             contents = apply_cleaned_content(
@@ -482,43 +519,17 @@ async def run_post_edit_validation(
         await db.commit()
         if rewrite_count >= max_rewrites:
             if has_fact_conflict(validator_result):
-                validator_result["terminal_block"] = True
-                chapter.status = "draft"
-                chapter.error = validation_errors
-                await db.commit()
-                await events.status(
-                    AGENT_VALIDATOR,
-                    chapter_index,
-                    "最终校验仍发现角色/时间线/设定硬冲突，本章已暂停，未强制发布。",
+                return await _terminal_block_outcome(
+                    db, novel, chapter_index, chapter, events,
+                    validator_result, validation_errors, rewrite_count,
+                    draft_content, edited_content, a5_polisher_used,
+                    reason="最终校验仍发现角色/时间线/设定硬冲突，本章已暂停，未强制发布。",
                 )
-                return PostEditValidationOutcome(
-                    validator_result=validator_result,
-                    draft_content=draft_content,
-                    edited_content=edited_content,
-                    rewrite_count=rewrite_count,
-                    decision="blocked",
-                    validation_errors=validation_errors,
-                    should_continue=False,
-                    a5_polisher_used=a5_polisher_used,
-                )
-            validator_result["terminal_block"] = True
-            chapter.status = "draft"
-            chapter.error = validation_errors
-            await db.commit()
-            await events.status(
-                AGENT_VALIDATOR,
-                chapter_index,
-                "编辑后法则校验在自动重写次数耗尽后仍未通过，未强制保存，本章已暂停等待人工处理。",
-            )
-            return PostEditValidationOutcome(
-                validator_result=validator_result,
-                draft_content=draft_content,
-                edited_content=edited_content,
-                rewrite_count=rewrite_count,
-                decision="blocked",
-                validation_errors=validation_errors,
-                should_continue=False,
-                a5_polisher_used=a5_polisher_used,
+            return await _terminal_block_outcome(
+                db, novel, chapter_index, chapter, events,
+                validator_result, validation_errors, rewrite_count,
+                draft_content, edited_content, a5_polisher_used,
+                reason="编辑后法则校验在自动重写次数耗尽后仍未通过，未强制保存，本章已暂停等待人工处理。",
             )
         return PostEditValidationOutcome(
             validator_result=validator_result,
@@ -534,15 +545,8 @@ async def run_post_edit_validation(
     mark_editor_success(chapter, rewrite_count)
     await save_editor_raw_issues(db, novel.id, chapter_index, raw_issues)
     await db.commit()
-    return PostEditValidationOutcome(
-        validator_result=validator_result,
-        draft_content=draft_content,
-        edited_content=edited_content,
-        rewrite_count=rewrite_count,
-        decision="proceed",
-        validation_errors="",
-        should_continue=False,
-        a5_polisher_used=a5_polisher_used,
+    return _accepted_outcome(
+        validator_result, draft_content, edited_content, rewrite_count, a5_polisher_used,
     )
 
 
