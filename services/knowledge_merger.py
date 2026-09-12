@@ -15,7 +15,7 @@ from agents.pipeline import ExtractorNode
 from agents.pipeline_context import PipelineContext
 from services.workflow_surface import is_short_form_workflow
 from services.stream_constants import STREAM_EVENT_CHARACTER_CARDS_UPDATED
-from services.knowledge_patch_models import KnowledgePatchSet, KnowledgePatchSummary
+from services.knowledge_patch_models import KnowledgePatchSet
 from services.character_card_service import apply_character_card_updates
 from services.character_card_bootstrap import (
     generate_initial_character_updates,
@@ -149,42 +149,49 @@ def append_extractor_review_flag(
     chapter.review_flags = list(flags) + [flag_entry]
 
 
-async def apply_extractor_updates(
+async def _capture_evidence_and_atoms(
     db: AsyncSession,
     novel: Novel,
     chapter: Chapter,
     extract_result: dict,
-    *,
-    ensure_active=None,
 ):
-    """Apply extractor output to living docs, vector outbox, and chapter state.
-
-    All canonical PostgreSQL projections for one chapter are committed once.
-    The vector worker consumes outbox rows only after that commit, so a failed
-    scene or narrative projection rolls back the complete publication.
-    """
-    chapter_index = chapter.chapter_index
+    """阶段 1:证据留档 + 原子候选写入(内容哈希幂等,失败即整体失败)。"""
     patch_set = KnowledgePatchSet.model_validate(extract_result)
-    character_updates = _character_updates_from_extractor(extract_result)
     evidence = None
     if settings.ENABLE_NOVEL_MEMORY_EVIDENCE:
         evidence = await capture_chapter_extractor_evidence(
             db,
             project_id=novel.id,
-            chapter_index=chapter_index,
+            chapter_index=chapter.chapter_index,
             chapter_content=chapter.content or "",
             extractor_output=extract_result,
         )
-    await broadcast_extractor_phase(novel.id, "writing")
     memory_atoms = []
     if settings.ENABLE_NOVEL_MEMORY_ATOMS:
         memory_atoms = await record_patch_atoms(
             db,
             project_id=novel.id,
-            chapter_index=chapter_index,
+            chapter_index=chapter.chapter_index,
             patch_set=patch_set,
             evidence_id=evidence.id if evidence is not None else None,
         )
+    return patch_set, memory_atoms
+
+
+async def _review_and_gate(
+    db: AsyncSession,
+    novel: Novel,
+    chapter: Chapter,
+    patch_set: KnowledgePatchSet,
+    memory_atoms: list,
+    character_updates: list,
+    ensure_active,
+):
+    """阶段 2:候选复核 + 硬冲突闸门。
+
+    返回 None 表示进入人工复核早退(状态已置、事务已提交,调用方直接 return);
+    否则返回 (atom_reviews, conflict_records) 供阶段 4 消费。
+    """
     atom_reviews = await review_atom_candidates(db, memory_atoms)
     atom_conflict_issues = [
         issue
@@ -199,7 +206,7 @@ async def apply_extractor_updates(
     conflict_records = await record_hard_conflicts(
         db,
         project_id=novel.id,
-        chapter_index=chapter_index,
+        chapter_index=chapter.chapter_index,
         issues=hard_issues,
     )
     if hard_issues and settings.ENABLE_AUTO_EXTRACTOR_REVIEW:
@@ -231,8 +238,17 @@ async def apply_extractor_updates(
         if ensure_active is not None:
             await ensure_active()
         await db.commit()
-        return
+        return None
+    return atom_reviews, conflict_records
 
+
+async def _apply_character_domain(
+    db: AsyncSession,
+    novel: Novel,
+    chapter_index: int,
+    character_updates: list,
+):
+    """阶段 3:角色卡事务(覆盖当前卡/快照/记录/关系/manifest 刷新)与向量投影。"""
     character_update_summary = await apply_character_card_updates(
         db,
         novel.id,
@@ -248,16 +264,21 @@ async def apply_extractor_updates(
         character_update_summary["changed_cards"],
         chapter_index=chapter_index,
     )
-    patch_summary = KnowledgePatchSummary(
-        changed_categorys=list(dict.fromkeys(patch.category for patch in patch_set.patches)),
-        changed_items=[f"{patch.category}:{patch.name}" for patch in patch_set.patches],
-        vector_items=[],
-    )
-    patch_summary.changed_items.extend(
-        f"character_card:{card.name}" for card in character_update_summary["changed_cards"]
-    )
-    if character_update_summary["changed_cards"]:
-        patch_summary.changed_categorys.append("character")
+    return character_update_summary, changed_character_names
+
+
+async def _promote_and_publish(
+    db: AsyncSession,
+    novel: Novel,
+    chapter: Chapter,
+    extract_result: dict,
+    atom_reviews: list,
+):
+    """阶段 4:候选转正 → 教义同步 → candidate 清扫 → 章节状态 → 场景块/叙事索引。
+
+    只写事务内状态;真正的 commit 由调用方统一执行。
+    """
+    chapter_index = chapter.chapter_index
     # Canonical services succeeded, so only the reviewed candidates can be
     # promoted. Conflicting candidates returned above as review items.
     accepted_memory_atoms = promote_reviewed_atom_candidates(atom_reviews)
@@ -288,8 +309,7 @@ async def apply_extractor_updates(
     novel.current_chapter = max(novel.current_chapter or 0, chapter_index)
     if (novel.total_chapters or 0) < chapter_index:
         novel.total_chapters = chapter_index
-    word_count = chapter_chars_from_row(chapter)
-    chapter.word_count = word_count
+    chapter.word_count = chapter_chars_from_row(chapter)
     novel.total_chars = await sum_project_chars(db, novel.id)
 
     if settings.ENABLE_NOVEL_MEMORY_SCENE_BLOCKS:
@@ -343,6 +363,41 @@ async def apply_extractor_updates(
             handoff=handoff.to_dict(),
             extractor_output=extract_result,
         )
+
+
+async def apply_extractor_updates(
+    db: AsyncSession,
+    novel: Novel,
+    chapter: Chapter,
+    extract_result: dict,
+    *,
+    ensure_active=None,
+):
+    """Apply extractor output to living docs, vector outbox, and chapter state.
+
+    编排:阶段1 证据/原子 → 阶段2 复核闸门(可能人工复核早退) → 阶段3 角色卡
+    → 阶段4 转正与投影 → 单次 commit。All canonical PostgreSQL projections for
+    one chapter are committed once; the vector worker consumes outbox rows only
+    after that commit, so a failed scene or narrative projection rolls back the
+    complete publication.
+    """
+    chapter_index = chapter.chapter_index
+    patch_set, memory_atoms = await _capture_evidence_and_atoms(db, novel, chapter, extract_result)
+    character_updates = _character_updates_from_extractor(extract_result)
+    await broadcast_extractor_phase(novel.id, "writing")
+
+    gated = await _review_and_gate(
+        db, novel, chapter, patch_set, memory_atoms, character_updates, ensure_active,
+    )
+    if gated is None:
+        return
+    atom_reviews, _conflict_records = gated
+
+    _character_summary, changed_character_names = await _apply_character_domain(
+        db, novel, chapter_index, character_updates,
+    )
+
+    await _promote_and_publish(db, novel, chapter, extract_result, atom_reviews)
 
     try:
         if ensure_active is not None:
