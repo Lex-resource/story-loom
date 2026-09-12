@@ -171,12 +171,35 @@
 
 **误报记录(下次审计别再追)**:`/api/writing/{}/status`、`{}/chapters`、`{}/chapter-outlines`、system-configs 的 default-graph/prompts —— 前端经 `useProjectData.js` 与 `${query}` 模板串调用,首轮提取漏计,已人工复核为**在用**。
 
+### 第 12-13 轮补充(树 I 增补)
+
+| 编号 | 节点 | 说明 | 状态 |
+|---|---|---|---|
+| I5 | 未使用 import 清理清单 ~35 处/22 文件 | 注意:朴素 AST 工具会报 258 条——绝大多数是 facade 再导出(`constants.py`、`models/novel.py` 兼容层、`agents/base.py` 聚合导出)的有意"未使用"。剔除噪音后的真候选集中在 `services/outline_service.py`(10 个)、`worker_support/orchestrator.py`(4 个)、`chapter_run_state.py`(7 个 VERDICT 常量)、`chapter_service/pipeline_service/memory_manager` 等 | ⬜ 一次性清理 |
+| I6 | ~~死配置~~ 已证伪 | 朴素扫描报 3 个(SQL_ECHO/HF_ENDPOINT/NOVEL_CONTINUITY_PROMPT_VERSION),全是检测器语料漏了 `database.py`/`config.py` 自引用的误报。**真死配置 = 无** | 🔵 |
+| I7 | 工程卫生核验 | `uv lock --check` 一致;零 skip/xfail 测试;`npm run check`(format+lint+build)全绿(1.04s)。唯一提示:vis-network 644KB 单 chunk,可选做代码分割 | 🔵(chunk 警告为可选优化) |
+| I8 | 索引覆盖核验 | 章节热查询(novel_id+chapter_index)有 `uq_chapters_novel_chapter` 背书;记忆召回有 `ix_novel_memory_atoms_recall` 等三个专用索引。无缺失 | 🔵 |
+
+**教训(工具不可信度)**:本轮三个自写扫描器各错一次——死配置阈值(≤1 误判"用一次=死")、语料漏 `database.py`、facade 噪音。**所有"孤儿/死配置"结论必须 grep 全库复核后才入档**,本文档中未复核的都已标注。
+
 ---
 
-## 饱和声明(第 11 轮修订)
+## 饱和声明(第 13 轮终版)
 
-第 10 轮的饱和判定**只对结构维度成立**;第 11 轮换方法(前后端契约语义比对)立即产出树 J,证明"换维度就有新发现"。本轮把 78 条后端路由逐条三角化(装饰器/add_api_route/前端调用/grep 复核),**API 维度现已饱和**。全森林 = 10 棵树、~50 节点。
+第 10 轮的饱和判定**只对结构维度成立**;第 11 轮换方法(前后端契约语义比对)立即产出树 J,证明"换维度就有新发现"。本轮把 78 条后端路由逐条三角化(装饰器/add_api_route/前端调用/grep 复核),**API 维度现已饱和**。
 
+第 12-13 轮扫过最后一批维度(死代码导出级/配置使用率/锁一致性/测试质量/前端门禁/索引覆盖),产出仅剩 P3 级清理项(I5)与核验记录(I6-I8),**无新树、无新因果边、无 P1/P2**。至此六个维度全部饱和:结构、语义契约、数据访问、异常语义、工程卫生、暴露面。全森林 = 10 棵树、~50 节点。
+
+### 各维度饱和清单
+
+| 维度 | 轮次 | 产出 |
+|---|---|---|
+| 结构(分层/规模/依赖方向) | 1-4、10 | 树 A-F |
+| 语义契约(路由↔调用) | 11 | 树 J |
+| 数据访问(N+1/锁/索引/阻塞) | 6-7、13 | 树 I(I1/I8) |
+| 异常语义(降级 vs 吞没) | 4 | 树 D |
+| 工程卫生(死代码/配置/锁/门禁) | 12-13 | 树 G、I5-I7 |
+| 暴露面(鉴权/CORS) | 10 | I4(干净) |
 
 ---
 
