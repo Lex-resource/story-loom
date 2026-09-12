@@ -380,13 +380,27 @@ async def apply_extractor_updates(
     except Exception:
         logger.exception("issue_summary_refresh_failed project_id=%s chapter_index=%s", novel.id, chapter_index)
 
+    await _run_post_publication_reviews(db, novel, chapter_index)
+
+
+async def _run_post_publication_reviews(
+    db: AsyncSession,
+    novel: Novel,
+    chapter_index: int,
+    *,
+    include_volume: bool = True,
+) -> None:
+    """章节发布后的整篇/整卷复盘。短篇走整篇 review,长篇按卷触发。
+
+    评审失败只记日志:复盘是发布后的附加动作,不能让它回滚已提交的章节。
+    """
     if is_short_form_workflow(novel.novel_format):
         try:
             from services.short_story_review import review_completed_short_story
             await review_completed_short_story(db, novel, chapter_index)
         except Exception:
             logger.exception("short_story_review_failed project_id=%s chapter_index=%s", novel.id, chapter_index)
-    else:
+    elif include_volume:
         try:
             from services.volume_review import review_volume, volume_index_ending_at
             volume_index = volume_index_ending_at(novel.outline, chapter_index)
@@ -429,12 +443,7 @@ async def run_post_processing(
             chapter_index,
             publication_source="post_processing_without_extractor",
         )
-        if is_short_form_workflow(novel.novel_format):
-            try:
-                from services.short_story_review import review_completed_short_story
-                await review_completed_short_story(db, novel, chapter_index)
-            except Exception:
-                logger.exception("short_story_review_failed project_id=%s chapter_index=%s", novel.id, chapter_index)
+        await _run_post_publication_reviews(db, novel, chapter_index, include_volume=False)
         return
 
     await stream_manager.broadcast(str(novel.id), "log", {"source": STREAM_SOURCE_EXTRACTOR, "message": "分层记忆提取器启动：正在从章节正文提取人物状态、世界规则、伏笔和剧情线变化..."})
