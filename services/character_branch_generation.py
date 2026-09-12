@@ -22,7 +22,8 @@ from services.character_branch_service import (
     )
 from services.character_branch_vector_service import enqueue_branch_chapter_vector
 from services.novel_memory_evidence import capture_branch_generation_evidence
-from services.novel_memory_scenes import aggregate_scene_block
+from services.novel_memory_consolidation import consolidate_scene_summary
+from services.novel_memory_scenes import aggregate_scene_block, fallback_scene_summary
 from services.character_constants import (
     CHARACTER_BRANCH_CHAPTER_STATUS_FAILED,
     CHARACTER_BRANCH_CHAPTER_STATUS_GENERATING,
@@ -328,6 +329,14 @@ async def process_character_branch_job(
             if settings.ENABLE_NOVEL_MEMORY_SCENE_BLOCKS:
                 try:
                     async with db.begin_nested():
+                        branch_summary = fallback_scene_summary(chapter.outline, chapter.content)
+                        if settings.ENABLE_SCENE_BLOCK_CONSOLIDATION:
+                            branch_summary = (
+                                await consolidate_scene_summary(
+                                    db, novel, chapter, branch_summary, accepted_atoms=[],
+                                )
+                                or branch_summary
+                            )
                         await aggregate_scene_block(
                             db,
                             project_id=novel.id,
@@ -335,7 +344,7 @@ async def process_character_branch_job(
                             storyline_id=branch.storyline_id,
                             scope_type="character_arc",
                             scope_key=branch.storyline_id,
-                            summary=(chapter.outline or {}).get("summary") or (chapter.content or "")[:800],
+                            summary=branch_summary,
                             current_state=chapter.state_data or {},
                             open_questions=(chapter.outline or {}).get("open_questions", []),
                             recent_changes=(chapter.relationship_changes or []),

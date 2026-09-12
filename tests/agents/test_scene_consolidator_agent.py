@@ -88,21 +88,22 @@ async def test_consolidate_scene_summary_returns_empty_on_blank_output():
 
 
 @pytest.mark.asyncio
-async def test_merger_consolidation_helper_falls_back_on_failure():
-    from services import knowledge_merger
+async def test_consolidation_falls_back_on_failure():
+    from types import SimpleNamespace as _NS
+
+    import agents.scene_consolidator_agent as module
+    from services.novel_memory_consolidation import consolidate_scene_summary
 
     class _BrokenAgent:
         def __init__(self):
             raise RuntimeError("no provider")
 
-    import agents.scene_consolidator_agent as module
-
     original = module.SceneConsolidatorAgent
     module.SceneConsolidatorAgent = _BrokenAgent
     try:
-        novel = SimpleNamespace(id="p", novel_format="long_webnovel")
-        chapter = SimpleNamespace(title="回执", chapter_index=3, content="正文")
-        summary = await knowledge_merger._consolidate_scene_summary(
+        novel = _NS(id="p", novel_format="long_webnovel")
+        chapter = _NS(title="回执", chapter_index=3, content="正文")
+        summary = await consolidate_scene_summary(
             None, novel, chapter, "大纲摘要", []
         )
     finally:

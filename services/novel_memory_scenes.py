@@ -18,6 +18,16 @@ from services.pipeline_types import VectorOutboxStatus
 from services.vector_constants import VECTOR_SCENE_BLOCK_ITEM_ID_TEMPLATE, VECTOR_SOURCE_SCENE_BLOCK
 
 
+def fallback_scene_summary(chapter_outline: Any, chapter_content: str | None) -> str:
+    """确定性回退摘要:大纲 summary 优先,否则正文前 800 字符。
+
+    主链(knowledge_merger)与支线(character_branch_generation)共用,
+    保证两条管线对"没有整合模型时场景块长什么样"只有一个答案。
+    """
+    outline = chapter_outline if isinstance(chapter_outline, dict) else {}
+    return str(outline.get("summary") or (chapter_content or "")[:800]).strip()
+
+
 def build_scene_block_content_hash(
     *,
     summary: str,
