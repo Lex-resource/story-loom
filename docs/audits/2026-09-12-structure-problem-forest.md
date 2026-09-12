@@ -21,9 +21,9 @@
 | B | B1/B2/B5 支线收编图执行器 | ⬜ 特性级重写,单独排期(先建支线 trace) | — |
 | C | C4 特征测试 | ✅ contract_builder_characterization 逐字节锁定(25 键) | P5-C1 |
 | C | C1 build_chapter_contract | ✅ 拆 6 阶段构建器,字节一致(特征测试当场抓到 V12 遗漏) | P5-C1 |
-| C | C2 contract_prompt 分段 | ⬜ 已隔离在 render 模块,输出被双快照锁定;待建同款特征测试后拆 | — |
+| C | C2 contract_prompt | ✅ 发现 return 后 142 行不可达死代码(三个历史版本),清除后 250→105 行,快照字节一致。**新类别:return 后不可达代码,历次 AST 扫描均未覆盖** | P5-C2 |
 | C | C3 writer_execution_brief | ✅ 特征测试锁定双 format 输出;190 行拆为 2 个投影工具 + 2 个回退构建器 | P5-C3 |
-| C | C3 build_chapter_handoff | ⬜ DB 密集;一次仓促拆分已按纪律回滚,待建 fake-session 特征测试后专项执行 | — |
+| C | C3 build_chapter_handoff | ✅ fake-session 特征测试锁定 17 键输出后,拆为查询编排 + _assemble_chapter_handoff 纯装配 | P5-C2/C3 |
 | D | D2/D3 降级可观测 | ✅ 11 处静默吞错统一 degraded: 标记 | P3 |
 | E | E1 胖路由 | ✅(树 J1 证实为死路由,见 J1a) | P1 |
 | F | F1 会话所有权 | ✅ docs/adr/0001 | P1 |
