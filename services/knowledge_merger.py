@@ -14,7 +14,7 @@ from agents.constants import (
 from agents.pipeline import ExtractorNode
 from agents.pipeline_context import PipelineContext
 from services.workflow_surface import is_short_form_workflow
-from services.stream_constants import STREAM_EVENT_CHARACTER_CARDS_UPDATED, STREAM_SOURCE_EXTRACTOR
+from services.stream_constants import STREAM_EVENT_CHARACTER_CARDS_UPDATED
 from services.knowledge_patch_models import KnowledgePatchSet, KnowledgePatchSummary
 from services.character_card_service import apply_character_card_updates
 from services.character_card_bootstrap import (
@@ -28,6 +28,7 @@ from services.pipeline_transitions import publish_chapter_state
 from services.pipeline_types import ChapterStatus
 from services.project_stats import chapter_chars_from_row, sum_project_chars
 from services.stream_manager import stream_manager
+from services.stream_events import broadcast_extractor_phase
 from services.novel_memory_evidence import capture_chapter_extractor_evidence
 from services.novel_memory_atoms import (
     atom_conflict_issue,
@@ -174,7 +175,7 @@ async def apply_extractor_updates(
             chapter_content=chapter.content or "",
             extractor_output=extract_result,
         )
-    await stream_manager.broadcast(str(novel.id), "log", {"source": STREAM_SOURCE_EXTRACTOR, "message": "正在写入并更新最新的人物经历与状态卡..."})
+    await broadcast_extractor_phase(novel.id, "writing")
     memory_atoms = []
     if settings.ENABLE_NOVEL_MEMORY_ATOMS:
         memory_atoms = await record_patch_atoms(
@@ -446,9 +447,9 @@ async def run_post_processing(
         await _run_post_publication_reviews(db, novel, chapter_index, include_volume=False)
         return
 
-    await stream_manager.broadcast(str(novel.id), "log", {"source": STREAM_SOURCE_EXTRACTOR, "message": "分层记忆提取器启动：正在从章节正文提取人物状态、世界规则、伏笔和剧情线变化..."})
+    await broadcast_extractor_phase(novel.id, "startup")
 
-    await stream_manager.broadcast(str(novel.id), "log", {"source": STREAM_SOURCE_EXTRACTOR, "message": "设定提取分析中：正在通过大语言模型同步人物状态、伏笔回收及世界规则变动..."})
+    await broadcast_extractor_phase(novel.id, "analyzing")
 
     from services.character_context import build_extractor_character_context
     outline_data = chapter.outline if isinstance(chapter.outline, dict) else {}

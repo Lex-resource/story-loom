@@ -39,6 +39,7 @@ from services.character_constants import (
 from services.novel_constants import JOB_TYPE_CHARACTER_BRANCH
 from services.pipeline_types import JobStatus
 from services.stream_manager import stream_manager
+from services.stream_events import STREAM_EVENT_CHARACTER_BRANCH
 
 
 logger = logging.getLogger(__name__)
@@ -182,7 +183,7 @@ async def _broadcast(branch: CharacterBranch, message: str, *, status: str | Non
     if status:
         data["branch_status"] = status
     try:
-        await stream_manager.broadcast(str(branch.project_id), "character_branch", data)
+        await stream_manager.broadcast(str(branch.project_id), STREAM_EVENT_CHARACTER_BRANCH, data)
     except Exception:
         logger.exception("branch_event_broadcast_failed branch_id=%s", branch.id)
 
