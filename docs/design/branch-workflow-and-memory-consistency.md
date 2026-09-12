@@ -103,3 +103,32 @@ graph JSON + surface_strategy + prompt_category + policy;`run_chapter_graph` 解
   广播,208 行编排删除;行为与手写版对齐(仅 4 个内容节点 + 场景块,
   是否加记忆提取默认不加,与现状一致)。
 - **D. 验证**:现有支线测试(test_character_branch_lifecycle 等)+ 全量套件。
+
+---
+
+## 增补需求(2026-09-12,二轮决策):支线是可续写的独立故事域
+
+支线不是"一次生成即弃",而是**可连续续写**的故事域,必须有与主线同构的记忆系统:
+
+- **锚点继承**:支线创建于主线第 N 章 → 支线继承"截至第 N 章"的主线记忆(锚点快照)
+- **自主演进**:支线第 1、2、3……章发布时,在**支线域**内跑完整记忆提取管线
+  (证据 → 原子 → 场景块,全部带 branch_id/storyline_id),支线自己的记忆文档
+  随续写逐章累积
+- **召回合成**:支线章节写作时的记忆 = 主线锚点快照(valid ≤ N,branch_id=NULL)
+  ∪ 支线自身累积记忆(branch_id=支线,全部)
+- **角色卡不变**:支线仍不更新主线角色卡(权威模型不变)
+
+### 实施计划(全部完成制)
+
+| 步骤 | 内容 | 关键文件 |
+|---|---|---|
+| A1 | 核实/补齐记忆写函数的 branch_id/storyline_id 参数(evidence/atoms) | novel_memory_evidence/novel_memory_atoms |
+| A2 | MemoryManager.get_context 分支模式:branch_id + anchor_chapter 参数;召回=支线域∪主线锚点 | memory_manager + novel_memory_recall |
+| B1 | 支线域后处理:branch 版 extractor 后处理(证据+原子+场景块,跳过角色卡/教义/叙事索引/主线发布) | knowledge_merger 或新模块 |
+| C1 | 支线 job 接图引擎:ChapterRunState 承载支线章节 + 小说工作流图 → run_chapter_graph | character_branch_generation + chapter_graph_runner |
+| C2 | checkpoint/广播挂接为 job 级钩子 | 同上 |
+| D1 | 删除手写四步编排,函数瘦身为入口+checkpoint+广播 | character_branch_generation |
+| E1 | 验证:支线生命周期测试 + 全量套件;支线记忆域隔离断言 | tests |
+
+行为对齐说明:手写版只有场景块写入支线域;新版按本计划补齐证据+原子,
+这是**有意的功能增强**(用户明确要求"相同的记忆系统撑着"),非遗留行为变更。
