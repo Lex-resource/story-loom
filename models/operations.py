@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, JSON, Boolean, Uuid, Float, Index, text
 from sqlalchemy.orm import relationship, validates
+from core.pipeline_vocab import JobStatus
 from models.base import Base, _utcnow
 
 
@@ -33,7 +34,6 @@ class Job(Base):
 
     @validates('status')
     def validate_job_status(self, key, value):
-        from services.pipeline_state import JobStatus
         valid_statuses = {e.value for e in JobStatus}
         if value and value not in valid_statuses:
             raise ValueError(f"Invalid Job status: {value}")

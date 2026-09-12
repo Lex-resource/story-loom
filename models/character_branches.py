@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text, Uuid, UniqueConstraint
 
 from models.base import Base, _utcnow
-from services.character_constants import (
+from core.character_vocab import (
     CHARACTER_BRANCH_CHAPTER_STATUS_DRAFT,
     CHARACTER_BRANCH_DEFAULT_STATUS,
 )

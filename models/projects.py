@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, JSON, Boolean, Uuid, Float, Index, UniqueConstraint
 from sqlalchemy.orm import relationship, validates
+from core.pipeline_vocab import NovelStatus, PipelineStep
 from models.base import Base, _utcnow
 
 
@@ -34,7 +35,6 @@ class Novel(Base):
 
     @validates('status')
     def validate_novel_status(self, key, value):
-        from services.pipeline_state import NovelStatus
         valid_statuses = {e.value for e in NovelStatus}
         if value and value not in valid_statuses:
             raise ValueError(f"Invalid Novel status: {value}")
@@ -78,7 +78,6 @@ class Chapter(Base):
 
     @validates('pipeline_step')
     def validate_pipeline_step(self, key, value):
-        from services.pipeline_state import PipelineStep
         valid_steps = {e.value for e in PipelineStep}
         if value and value not in valid_steps:
             raise ValueError(f"Invalid pipeline step: {value}")

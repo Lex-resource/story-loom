@@ -20,7 +20,7 @@ from sqlalchemy import (
 )
 
 from models.base import Base, _utcnow
-from services.character_constants import (
+from core.character_vocab import (
     CHARACTER_GENERATION_DEFAULT_IMPORTANCE,
     CHARACTER_GENERATION_DEFAULT_STATUS,
     CHARACTER_ARC_DEFAULT_STATUS,

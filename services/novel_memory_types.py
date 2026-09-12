@@ -1,57 +1,29 @@
-"""Shared vocabulary for the novel memory layers.
+"""Compatibility facade — 实现已下沉到 core.novel_memory_vocab。
 
-These values are deliberately plain strings so they can be used by both ORM
-models and background workers without coupling the persistence layer to a
-specific API schema.
+现有 `from services.novel_memory_types import X` 全部保持可用。
 """
 
-from typing import Final
+from __future__ import annotations
 
-
-STORYLINE_MAIN: Final[str] = "main"
-
-ATOM_STATUS_CANDIDATE: Final[str] = "candidate"
-ATOM_STATUS_ACCEPTED: Final[str] = "accepted"
-ATOM_STATUS_REJECTED: Final[str] = "rejected"
-ATOM_STATUS_SUPERSEDED: Final[str] = "superseded"
-ATOM_STATUSES: Final[tuple[str, ...]] = (
-    ATOM_STATUS_CANDIDATE,
+from core.novel_memory_vocab import (  # noqa: F401  (facade re-exports)
+    ATOM_STATUSES,
     ATOM_STATUS_ACCEPTED,
+    ATOM_STATUS_CANDIDATE,
     ATOM_STATUS_REJECTED,
     ATOM_STATUS_SUPERSEDED,
-)
-
-AUTHORITY_GENERATED: Final[str] = "generated"
-AUTHORITY_USER: Final[str] = "user"
-AUTHORITY_PUBLISHED: Final[str] = "published"
-AUTHORITY_SYSTEM: Final[str] = "system"
-AUTHORITIES: Final[tuple[str, ...]] = (
+    AUTHORITIES,
     AUTHORITY_GENERATED,
-    AUTHORITY_USER,
     AUTHORITY_PUBLISHED,
     AUTHORITY_SYSTEM,
-)
-
-SCENE_BLOCK_ACTIVE: Final[str] = "active"
-SCENE_BLOCK_ARCHIVED: Final[str] = "archived"
-
-CONFLICT_OPEN: Final[str] = "open"
-CONFLICT_RESOLVED: Final[str] = "resolved"
-CONFLICT_DISMISSED: Final[str] = "dismissed"
-CONFLICT_STATUSES: Final[tuple[str, ...]] = (
+    AUTHORITY_USER,
+    CONFLICT_DISMISSED,
     CONFLICT_OPEN,
     CONFLICT_RESOLVED,
-    CONFLICT_DISMISSED,
+    CONFLICT_STATUSES,
+    SCENE_BLOCK_ACTIVE,
+    SCENE_BLOCK_ARCHIVED,
+    STORYLINE_MAIN,
+    is_valid_atom_status,
+    is_valid_authority,
+    is_valid_conflict_status,
 )
-
-
-def is_valid_atom_status(value: str) -> bool:
-    return value in ATOM_STATUSES
-
-
-def is_valid_authority(value: str) -> bool:
-    return value in AUTHORITIES
-
-
-def is_valid_conflict_status(value: str) -> bool:
-    return value in CONFLICT_STATUSES

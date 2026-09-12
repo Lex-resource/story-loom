@@ -22,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import validates
 
 from models.base import Base, _utcnow
-from services.novel_memory_types import (
+from core.novel_memory_vocab import (
     ATOM_STATUSES,
     AUTHORITIES,
     CONFLICT_STATUSES,

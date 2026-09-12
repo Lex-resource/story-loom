@@ -9,6 +9,10 @@ agents/tuning.py —— 两者从这里再导出,现有 `from agents.constants i
 """
 
 from agents.agent_registry import (  # noqa: F401  (facade re-exports)
+    get_default_agent,
+    register_agent,
+)
+from core.agent_vocab import (  # noqa: F401  (facade re-exports)
     AGENT_CHARACTER_CARD,
     AGENT_EDITOR,
     AGENT_EXTRACTOR,
@@ -16,8 +20,6 @@ from agents.agent_registry import (  # noqa: F401  (facade re-exports)
     AGENT_SCENE_CONSOLIDATOR,
     AGENT_VALIDATOR,
     AGENT_WRITER,
-    get_default_agent,
-    register_agent,
 )
 from agents.tuning import (  # noqa: F401  (facade re-exports)
     CHARACTER_CARD_TEMPERATURE,
