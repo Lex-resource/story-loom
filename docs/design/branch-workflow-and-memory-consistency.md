@@ -122,9 +122,9 @@ graph JSON + surface_strategy + prompt_category + policy;`run_chapter_graph` 解
 
 | 步骤 | 内容 | 关键文件 |
 |---|---|---|
-| A1 | 核实/补齐记忆写函数的 branch_id/storyline_id 参数(evidence/atoms) | novel_memory_evidence/novel_memory_atoms |
-| A2 | MemoryManager.get_context 分支模式:branch_id + anchor_chapter 参数;召回=支线域∪主线锚点 | memory_manager + novel_memory_recall |
-| B1 | 支线域后处理:branch 版 extractor 后处理(证据+原子+场景块,跳过角色卡/教义/叙事索引/主线发布) | knowledge_merger 或新模块 |
+| A1 | ✅ 记忆写函数原生支持 branch_id/storyline_id(无需改动) | — |
+| A2 | ✅ 支线域召回接入支线上下文(recall_novel_memory branch 模式) | character_branch_generation |
+| B1 | ✅ 支线域记忆提取:ExtractorNode + 证据/原子/场景块全支线域,整合吃支线原子 | character_branch_generation |
 | C1 | 支线 job 接图引擎:ChapterRunState 承载支线章节 + 小说工作流图 → run_chapter_graph | character_branch_generation + chapter_graph_runner |
 | C2 | checkpoint/广播挂接为 job 级钩子 | 同上 |
 | D1 | 删除手写四步编排,函数瘦身为入口+checkpoint+广播 | character_branch_generation |
