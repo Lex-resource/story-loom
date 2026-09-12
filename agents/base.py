@@ -43,9 +43,19 @@ logger = logging.getLogger(__name__)
 class AgentBase:
     def __init__(self, model: Optional[str] = None):
         self.model = model
-        # LLM 超时/重试入库(runtime_tunables)。构造是同步的,读进程内快照;
-        # 快照由 worker 轮询循环的异步读点驱动刷新 —— 前端改完,下一章
-        # 新建的 agent 即生效。
+        # LLM 超时/重试入库(runtime_tunables)。快照读取与 transport 构造都
+        # 延迟到首次 LLM 调用(_ensure_llm_runtime):构造发生在上下文装配阶段,
+        # 不该做 IO;且调参改完后下一次调用立即生效,不必等新 agent 实例。
+        self.timeout: Optional[int] = None
+        self.max_retries: Optional[int] = None
+        self._transport: Optional[OpenAICompatibleTransport] = None
+
+    def _ensure_llm_runtime(self) -> None:
+        """首次 LLM 调用时读 tunables 快照并构造 transport(只做一次)。"""
+        if self._transport is not None:
+            return
+        # 快照由 worker 轮询循环的异步读点驱动刷新 —— 前端改完,下一次
+        # 调用即生效。
         self.timeout = get_value_sync("llm_timeout_seconds")
         self.max_retries = get_value_sync("llm_max_retries")
         self._transport = OpenAICompatibleTransport(
@@ -105,6 +115,7 @@ class AgentBase:
         (which would be unsafe under concurrent use of the same agent
         instance).
         """
+        self._ensure_llm_runtime()
         from services.token_count import count_tokens
         # tokenizer 首次加载是数秒级磁盘 IO，encode 大 prompt 也是 CPU 密集，
         # 都不能在事件循环里同步跑。
