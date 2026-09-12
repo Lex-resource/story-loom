@@ -16,7 +16,7 @@
 |---|---|---|---|
 | A | A2 状态魔法串 | ✅ 19 处替换为枚举 + test_status_enum_usage 架构测试(上线即抓 11 处漏网) | P2 |
 | A | A3 来源引用模板 | ✅ core.source_refs 统一,3 文件 7 处收敛 | P2 |
-| A | A1 延迟导入提升 | ⬜ 未动(同层单向依赖,价值低;prompt_hints 12 处为有意接缝不动) | — |
+| A | A1 延迟导入提升 | ⬜ 尝试过一次朴素正则提升,踩 TYPE_CHECKING/缩进/插入点三类边界后按纪律整体回滚;需要 ruff 级专业工具再做,价值低不急 | — |
 | B | B3/B4 场景块回退重复+能力缺失 | ✅ fallback_scene_summary 共享;支线接入整合开关 | P4 |
 | B | B1/B2/B5 支线收编图执行器 | ⬜ 特性级重写,单独排期(先建支线 trace) | — |
 | C | C4 特征测试 | ✅ contract_builder_characterization 逐字节锁定(25 键) | P5-C1 |
