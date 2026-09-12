@@ -154,3 +154,37 @@ graph JSON + surface_strategy + prompt_category + policy;`run_chapter_graph` 解
   (同 agent/同提示词通道/同记忆系统),手写编排保留至仓库层重构完成。
 - **B1 的边界**:支线后处理 = 证据 + 原子 + 场景块(全部 branch 域);
   跳过角色卡更新/教义同步/叙事索引/主线发布状态(权威模型不变)。
+
+---
+
+## 图引擎迁移实施计划(2026-09-12 探查后定稿)
+
+探查结论(CodeGraph + 源码):主线耦合点是 **`worker_support/chapter_repository.py`**
+的持久化函数族(get_chapter_by_index/get_or_create_chapter/prepare_chapter_for_step/
+save_planner_outline/sync_chapter_outline 等,全部以 `(db, novel_id, chapter_index)`
+查主线 Chapter 表)+ 适配器/flows 的少量直调(chapter_steps:247,498、
+generation_writer_flow:181)。**接缝就是 chapter_repository。**
+
+### 方案:章节域(domain)参数化
+
+```python
+@dataclass(frozen=True)
+class ChapterDomain:
+    project_id: uuid.UUID        # novels.id(支线同挂一个 novel)
+    branch_id: uuid.UUID | None  # None = 主线
+    storyline_id: str = "main"
+```
+
+1. **E1**:chapter_repository 全函数签名 `(db, novel_id, chapter_index)` →
+   `(db, domain: ChapterDomain, chapter_index)`;内部按 branch_id 分派
+   Chapter 表 / CharacterBranchChapter 表。主线行为零变化(trace 保护)。
+2. **E2**:适配器与 flows 经 `state.domain` 调用(codegraph 清单逐点替换)。
+3. **E3**:MemoryManager 支线召回模式(支线域 ∪ 锚点快照,已在 B1 验证可行)。
+4. **E4**:postprocess 按 domain 分派:主线 → run_post_processing(现状);
+   支线 → 支线记忆写入(B1 已建:extractor+证据+原子+场景块)。
+5. **E5**:支线 job handler 重写:解析 domain → 取小说工作流图 → 构建
+   ChapterRunState(domain+branch) → run_chapter_graph;checkpoint/广播挂
+   job 级钩子;**手写四步编排删除**。
+6. **E6**:验证:支线生命周期测试 + 全量 + grep 复核无残留主线直调。
+
+工作量:1-2 个会话。每步全量测试,golden trace 全程红线。
