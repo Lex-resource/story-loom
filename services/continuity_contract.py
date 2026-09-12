@@ -503,12 +503,12 @@ def build_dramatic_turn_projection(contract: dict[str, Any] | None) -> dict[str,
     }
 
 
-def build_chapter_contract(
+def _normalize_contract_inputs(
     outline: dict[str, Any] | None,
-    handoff: dict[str, Any] | None = None,
-    *,
-    enforce_authority: bool | None = None,
-) -> dict[str, Any]:
+    handoff: dict[str, Any] | None,
+    enforce_authority: bool | None,
+):
+    """阶段 1:输入归一化 + legacy 覆盖层分派。"""
     # 低于 V43 的契约行为已冻结在 research/prompt_versions/contract_legacy.py。
     _legacy = research_override("legacy_build_chapter_contract", outline, handoff, enforce_authority=enforce_authority)
     if _legacy is not NO_OVERRIDE:
@@ -518,7 +518,16 @@ def build_chapter_contract(
     if enforce_authority is None:
         # V3 起权威边界始终启用；生产冻结在 V43。
         enforce_authority = True
+    return outline, handoff, enforce_authority
 
+
+def _extract_event_rules(
+    outline: dict[str, Any],
+    handoff: dict[str, Any],
+    *,
+    enforce_authority: bool,
+):
+    """阶段 2:事件与禁止项提取(unknown 边界保护 + required/uncertain 划分)。"""
     handoff_unknown = _as_strings(handoff.get("unknown_boundary"))
     outline_unknown = _as_strings(outline.get("unknown_boundary"))
     unknown_boundary = _dedupe(handoff_unknown + outline_unknown)
@@ -546,7 +555,17 @@ def build_chapter_contract(
             forbidden_deviations
             + ["不得把 unknown 或 candidate/generated 线索写成已确认身份、因果、生死或地点事实。"]
         )
+    return unknown_boundary, required_events, uncertain_events, forbidden_deviations
 
+
+def _assemble_core_contract(
+    outline: dict[str, Any],
+    handoff: dict[str, Any],
+    unknown_boundary: list[str],
+    required_events: list[str],
+    forbidden_deviations: list[str],
+) -> dict[str, Any]:
+    """阶段 3:V43 核心 contract 字段装配。"""
     primary_action = _normalize_primary_action(outline.get("primary_action"))
     character_turn = _normalize_character_turn(outline.get("character_turn"))
     # V58 起从已给出的大纲证据补全 character_turn 缺项。生产冻结在 V43，不补全。
@@ -591,154 +610,203 @@ def build_chapter_contract(
     extension = research_override("contract_extensions", contract, outline, handoff)
     if extension is not NO_OVERRIDE:
         contract.update(extension)
+    return contract
 
-    if enforce_authority:
-        contract.update(
-            {
-                "uncertain_events": uncertain_events,
-                "authority_policy": {
-                    "direct_fact_levels": ["published", "user", "frozen", "accepted"],
-                    "clue_only_levels": ["candidate", "generated"],
+
+def _apply_authority_block(
+    contract: dict[str, Any],
+    outline: dict[str, Any],
+    handoff: dict[str, Any],
+    uncertain_events: list[str],
+) -> None:
+    """阶段 4:权威策略、V11 状态边界与 V43 继承态规则。"""
+    contract.update(
+        {
+            "uncertain_events": uncertain_events,
+            "authority_policy": {
+                "direct_fact_levels": ["published", "user", "frozen", "accepted"],
+                "clue_only_levels": ["candidate", "generated"],
                 "unknown_action": "可描写观察、疑问和调查动作，但禁止补全结论。",
                 "evidence_relation_policy": "关联/相似/指向不等于归属、执行、身份或因果确认。",
-                },
-                "authoritative_sources": [
-                    {"source": "published_chapter", "authority": "published"},
-                    {"source": "user_setting_or_frozen_character_card", "authority": "frozen"},
-                    {"source": "accepted_layered_memory", "authority": "accepted"},
-                    {"source": "current_chapter_contract", "authority": "accepted"},
-                ],
-            }
-        )
-        state_boundary_rules, claim_boundary_rules = _build_v11_state_boundaries(
-            outline,
-            handoff,
-            contract,
-        )
-        contract["state_boundary_rules"] = state_boundary_rules
-        contract["claim_boundary_rules"] = claim_boundary_rules
-        evidence_surface_rules, evidence_surface_claims = _build_v12_evidence_surface_rules(
-            outline,
-            handoff,
-        )
-        contract["evidence_surface_rules"] = evidence_surface_rules
-        contract["evidence_surface_claims"] = evidence_surface_claims
-        contract.setdefault("state_boundary_rules", []).extend(
-            [
-                {
-                    "state": "post_closure_window",
-                    "rule": "上一章已关闭或封存的读取/访问窗口，本章只能确认其封存状态；重新开启必须明确操作人、范围和关闭过程。",
-                },
-                {
-                    "state": "countdown_monotonic",
-                    "rule": "同一倒计时沿用上一章状态并单向递减；数值回升必须明确标注重置、校准或新周期。",
-                },
-            ]
-        )
-        contract.setdefault("state_boundary_rules", []).append(
+            },
+            "authoritative_sources": [
+                {"source": "published_chapter", "authority": "published"},
+                {"source": "user_setting_or_frozen_character_card", "authority": "frozen"},
+                {"source": "accepted_layered_memory", "authority": "accepted"},
+                {"source": "current_chapter_contract", "authority": "accepted"},
+            ],
+        }
+    )
+    state_boundary_rules, claim_boundary_rules = _build_v11_state_boundaries(
+        outline,
+        handoff,
+        contract,
+    )
+    contract["state_boundary_rules"] = state_boundary_rules
+    contract["claim_boundary_rules"] = claim_boundary_rules
+    evidence_surface_rules, evidence_surface_claims = _build_v12_evidence_surface_rules(
+        outline,
+        handoff,
+    )
+    contract["evidence_surface_rules"] = evidence_surface_rules
+    contract["evidence_surface_claims"] = evidence_surface_claims
+    contract.setdefault("state_boundary_rules", []).extend(
+        [
             {
-                "state": "single_precise_countdown",
-                "rule": "同一章节同一倒计时周期只保留一个精确数值；后续只能写继续递减或事件推进。新的精确值必须明确标注重置、校准或新周期。",
-            }
-        )
-        contract.setdefault("state_boundary_rules", []).append(
-            {
-                "state": "inherited_current_state",
-                "rule": "handoff.inherited_state 是本章开场已经成立的当前状态；不得把同一状态写成再次发生的变化。只有明确的本章动作、撤回、转移、重置或新周期才能改变它。",
-                "inherited_state_source": "chapter_handoff.inherited_state",
-                "current_change_source": "current_chapter_contract.state_changes",
-            }
-        )
-        item_ledger = handoff.get("item_state_ledger") or []
-        contract["item_state_rules"] = [
-            {
-                "state": "unregistered_physical_artifact",
-                "ledger_entries": item_ledger,
-                "rule": (
-                    "除既有场景和 item_state_ledger 已登记条目外，不得新增纸张、记录页、原件、副本、附件、工具、"
-                    "持有者或转移过程；账本为空时，实体物品状态保持 unknown。记录证据只能使用界面内记录、口述复述、"
-                    "纯观察或已在场设备。"
-                ),
+                "state": "post_closure_window",
+                "rule": "上一章已关闭或封存的读取/访问窗口，本章只能确认其封存状态；重新开启必须明确操作人、范围和关闭过程。",
             },
             {
-                "state": "closed_read_only_window",
-                "rule": (
-                    "上一章已关闭的读取窗口只能展开或查看仍保留的只读监测列表；不得写成重新点开、重新开启、"
-                    "重新授权或设备主动响应。"
-                ),
+                "state": "countdown_monotonic",
+                "rule": "同一倒计时沿用上一章状态并单向递减；数值回升必须明确标注重置、校准或新周期。",
             },
         ]
-        contract["forbidden_deviations"] = _dedupe(
-            contract.get("forbidden_deviations", [])
-            + [
-                "不得把未登记实体物品或持有者写成当前事实；不得把已关闭窗口写成重新开放。",
-            ]
-        )
-        contract.setdefault("state_boundary_rules", []).append(
-            {
-                "state": "read_only_action_ownership",
-                "rule": (
-                    "界面读取、展开、确认或接受历史内容只能改变可见信息，不能直接产生开门、授权、控制链执行或实体影响；"
-                    "实体变化必须有角色明确的物理动作或直接反馈，机制不明时保持 observation/unknown。"
-                ),
-            }
-        )
-        contract["forbidden_deviations"] = _dedupe(
-            contract.get("forbidden_deviations", [])
-            + [
-                "不得把界面读取或确认直接写成设备开门、授权、控制链执行或实体状态变化。",
-            ]
-        )
-        item_ledger = handoff.get("item_state_ledger") or []
-        contract["recording_action_rules"] = {
-            "mode": "ledger_only_physical_artifacts" if item_ledger else "no_new_physical_record_artifact",
-            "allowed_default": [
-                "界面内记录",
-                "口述复述",
-                "纯观察",
-                "item_state_ledger 已登记且已在场的设备",
-            ],
-            "requires_matching_ledger": [
-                "笔记本",
-                "纸张",
-                "纸面",
-                "记录页",
-                "笔",
-                "便签",
-                "原件",
-                "副本",
-                "附件",
-                "文件夹",
-            ],
+    )
+    contract.setdefault("state_boundary_rules", []).append(
+        {
+            "state": "single_precise_countdown",
+            "rule": "同一章节同一倒计时周期只保留一个精确数值；后续只能写继续递减或事件推进。新的精确值必须明确标注重置、校准或新周期。",
+        }
+    )
+    contract.setdefault("state_boundary_rules", []).append(
+        {
+            "state": "inherited_current_state",
+            "rule": "handoff.inherited_state 是本章开场已经成立的当前状态；不得把同一状态写成再次发生的变化。只有明确的本章动作、撤回、转移、重置或新周期才能改变它。",
+            "inherited_state_source": "chapter_handoff.inherited_state",
+            "current_change_source": "current_chapter_contract.state_changes",
+        }
+    )
+
+
+def _apply_item_and_recording_rules(
+    contract: dict[str, Any],
+    handoff: dict[str, Any],
+) -> None:
+    """阶段 5:物品账本 / 记录动作 / 禁止项追加(V40 域)。"""
+    item_ledger = handoff.get("item_state_ledger") or []
+    contract["item_state_rules"] = [
+        {
+            "state": "unregistered_physical_artifact",
+            "ledger_entries": item_ledger,
             "rule": (
-                "记录、保存或留存信息的剧情动作不得自动新增具体实体物品；"
-                "只有 item_state_ledger 明确登记对应物品且本章动作允许，才能描写该物品的持有、书写、翻页、拍摄或转移。"
+                "除既有场景和 item_state_ledger 已登记条目外，不得新增纸张、记录页、原件、副本、附件、工具、"
+                "持有者或转移过程；账本为空时，实体物品状态保持 unknown。记录证据只能使用界面内记录、口述复述、"
+                "纯观察或已在场设备。"
+            ),
+        },
+        {
+            "state": "closed_read_only_window",
+            "rule": (
+                "上一章已关闭的读取窗口只能展开或查看仍保留的只读监测列表；不得写成重新点开、重新开启、"
+                "重新授权或设备主动响应。"
+            ),
+        },
+    ]
+    contract["forbidden_deviations"] = _dedupe(
+        contract.get("forbidden_deviations", [])
+        + [
+            "不得把未登记实体物品或持有者写成当前事实；不得把已关闭窗口写成重新开放。",
+        ]
+    )
+    contract.setdefault("state_boundary_rules", []).append(
+        {
+            "state": "read_only_action_ownership",
+            "rule": (
+                "界面读取、展开、确认或接受历史内容只能改变可见信息，不能直接产生开门、授权、控制链执行或实体影响；"
+                "实体变化必须有角色明确的物理动作或直接反馈，机制不明时保持 observation/unknown。"
             ),
         }
-        contract["interpretation_boundary_rules"] = {
-            "observed": [
-                "界面、设备、回执明确显示的原文或角色直接感知的可见变化。",
-            ],
-            "tentative": [
-                "角色保留‘也许/可能/尚不能判断’的暂时解释，只能作为猜测或待核对线索。",
-            ],
-            "investigation": [
-                "角色的追问、核对、查询和寻找下一条证据的动作，不等于目标已经存在或事件已经发生。",
-            ],
-            "forbidden_upgrades": [
-                "残缺片段、显示时间、相邻出现或重复响应不得升级为已发生历史、完整记录、真实地点或因果。",
-                "设备提示、拒答或响应不得单独证明设备意图、要求、控制动作或目标存在。",
-                "角色猜测不得在句末被收束为身份、来源、归属、执行、能力或因果事实。",
-            ],
-            "rule": "先写观察，再写保留不确定性的猜测或调查；没有直接证据不得把解释写成事实。",
-        }
-        contract["forbidden_deviations"] = _dedupe(
-            contract.get("forbidden_deviations", [])
-            + [
-                "不得把可见提示、残缺片段、角色猜测或调查目标升级成已发生历史、设备意图、完整记录或因果事实。",
-            ]
-        )
-        contract["end_state_boundary"] = _build_v40_end_state_boundary(contract)
+    )
+    contract["forbidden_deviations"] = _dedupe(
+        contract.get("forbidden_deviations", [])
+        + [
+            "不得把界面读取或确认直接写成设备开门、授权、控制链执行或实体状态变化。",
+        ]
+    )
+    item_ledger = handoff.get("item_state_ledger") or []
+    contract["recording_action_rules"] = {
+        "mode": "ledger_only_physical_artifacts" if item_ledger else "no_new_physical_record_artifact",
+        "allowed_default": [
+            "界面内记录",
+            "口述复述",
+            "纯观察",
+            "item_state_ledger 已登记且已在场的设备",
+        ],
+        "requires_matching_ledger": [
+            "笔记本",
+            "纸张",
+            "纸面",
+            "记录页",
+            "笔",
+            "便签",
+            "原件",
+            "副本",
+            "附件",
+            "文件夹",
+        ],
+        "rule": (
+            "记录、保存或留存信息的剧情动作不得自动新增具体实体物品；"
+            "只有 item_state_ledger 明确登记对应物品且本章动作允许，才能描写该物品的持有、书写、翻页、拍摄或转移。"
+        ),
+    }
+
+
+def _apply_interpretation_rules(contract: dict[str, Any]) -> None:
+    """阶段 6:解释边界与终态边界。"""
+    contract["interpretation_boundary_rules"] = {
+        "observed": [
+            "界面、设备、回执明确显示的原文或角色直接感知的可见变化。",
+        ],
+        "tentative": [
+            "角色保留‘也许/可能/尚不能判断’的暂时解释，只能作为猜测或待核对线索。",
+        ],
+        "investigation": [
+            "角色的追问、核对、查询和寻找下一条证据的动作，不等于目标已经存在或事件已经发生。",
+        ],
+        "forbidden_upgrades": [
+            "残缺片段、显示时间、相邻出现或重复响应不得升级为已发生历史、完整记录、真实地点或因果。",
+            "设备提示、拒答或响应不得单独证明设备意图、要求、控制动作或目标存在。",
+            "角色猜测不得在句末被收束为身份、来源、归属、执行、能力或因果事实。",
+        ],
+        "rule": "先写观察，再写保留不确定性的猜测或调查；没有直接证据不得把解释写成事实。",
+    }
+    contract["forbidden_deviations"] = _dedupe(
+        contract.get("forbidden_deviations", [])
+        + [
+            "不得把可见提示、残缺片段、角色猜测或调查目标升级成已发生历史、设备意图、完整记录或因果事实。",
+        ]
+    )
+    contract["end_state_boundary"] = _build_v40_end_state_boundary(contract)
+
+
+def build_chapter_contract(
+    outline: dict[str, Any] | None,
+    handoff: dict[str, Any] | None = None,
+    *,
+    enforce_authority: bool | None = None,
+) -> dict[str, Any]:
+    """构建单章执行契约。
+
+    编排:阶段1 输入归一化 → 阶段2 事件规则 → 阶段3 核心装配 →
+    阶段4-6 权威/物品/解释边界(仅在 enforce_authority 下)。
+    输出由 tests/services/test_contract_builder_characterization.py 逐字节锁定。
+    """
+    normalized = _normalize_contract_inputs(outline, handoff, enforce_authority)
+    if not isinstance(normalized, tuple):
+        return normalized
+    outline, handoff, enforce_authority = normalized
+
+    unknown_boundary, required_events, uncertain_events, forbidden_deviations = (
+        _extract_event_rules(outline, handoff, enforce_authority=enforce_authority)
+    )
+    contract = _assemble_core_contract(
+        outline, handoff, unknown_boundary, required_events, forbidden_deviations,
+    )
+
+    if enforce_authority:
+        _apply_authority_block(contract, outline, handoff, uncertain_events)
+        _apply_item_and_recording_rules(contract, handoff)
+        _apply_interpretation_rules(contract)
     return contract
 
 

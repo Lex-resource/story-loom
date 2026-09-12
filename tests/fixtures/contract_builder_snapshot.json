@@ -1,0 +1,158 @@
+{
+  "contract": {
+    "authoritative_sources": [
+      {
+        "authority": "published",
+        "source": "published_chapter"
+      },
+      {
+        "authority": "frozen",
+        "source": "user_setting_or_frozen_character_card"
+      },
+      {
+        "authority": "accepted",
+        "source": "accepted_layered_memory"
+      },
+      {
+        "authority": "accepted",
+        "source": "current_chapter_contract"
+      }
+    ],
+    "authority_policy": {
+      "clue_only_levels": [
+        "candidate",
+        "generated"
+      ],
+      "direct_fact_levels": [
+        "published",
+        "user",
+        "frozen",
+        "accepted"
+      ],
+      "evidence_relation_policy": "关联/相似/指向不等于归属、执行、身份或因果确认。",
+      "unknown_action": "可描写观察、疑问和调查动作，但禁止补全结论。"
+    },
+    "character_turn": {},
+    "claim_boundary_rules": [
+      "上一章交接状态是本章开场的继承事实；start_state 只描述继承与当前缺口，state_changes/end_state 才能引入本章发生的新状态。"
+    ],
+    "continuity_from_previous": [],
+    "end_state": "",
+    "end_state_boundary": {
+      "authority": "terminal_chapter_state",
+      "final_state": "",
+      "resolution": "若出现‘准备/决定/将要’与‘已经完成’的轻微措辞差异，先按 end_state 的终态解释并由 Editor 局部统一；只有正文真实改变已接受事实、时间线、物品/地点状态或核心事件时才阻断。",
+      "rule": "end_state 表示本章最后已经成立的可观察状态；beats、required_events 和 state_changes 不得把正文推进到该状态之后。"
+    },
+    "evidence_boundaries": [],
+    "evidence_state_ledger": [],
+    "evidence_surface_claims": [
+      "当正文同时出现读取路径、来源字段和设备回执时，必须使用不同的限定词；‘来源显示为’不得同时承担读取路径和帧内来源字段两种含义。"
+    ],
+    "evidence_surface_rules": [],
+    "forbidden_deviations": [
+      "不得把 unknown 或 candidate/generated 线索写成已确认身份、因果、生死或地点事实。",
+      "不得把未登记实体物品或持有者写成当前事实；不得把已关闭窗口写成重新开放。",
+      "不得把界面读取或确认直接写成设备开门、授权、控制链执行或实体状态变化。",
+      "不得把可见提示、残缺片段、角色猜测或调查目标升级成已发生历史、设备意图、完整记录或因果事实。"
+    ],
+    "foreshadowing_actions": [],
+    "interpretation_boundary_rules": {
+      "forbidden_upgrades": [
+        "残缺片段、显示时间、相邻出现或重复响应不得升级为已发生历史、完整记录、真实地点或因果。",
+        "设备提示、拒答或响应不得单独证明设备意图、要求、控制动作或目标存在。",
+        "角色猜测不得在句末被收束为身份、来源、归属、执行、能力或因果事实。"
+      ],
+      "investigation": [
+        "角色的追问、核对、查询和寻找下一条证据的动作，不等于目标已经存在或事件已经发生。"
+      ],
+      "observed": [
+        "界面、设备、回执明确显示的原文或角色直接感知的可见变化。"
+      ],
+      "rule": "先写观察，再写保留不确定性的猜测或调查；没有直接证据不得把解释写成事实。",
+      "tentative": [
+        "角色保留‘也许/可能/尚不能判断’的暂时解释，只能作为猜测或待核对线索。"
+      ]
+    },
+    "item_state_ledger": [],
+    "item_state_rules": [
+      {
+        "ledger_entries": [],
+        "rule": "除既有场景和 item_state_ledger 已登记条目外，不得新增纸张、记录页、原件、副本、附件、工具、持有者或转移过程；账本为空时，实体物品状态保持 unknown。记录证据只能使用界面内记录、口述复述、纯观察或已在场设备。",
+        "state": "unregistered_physical_artifact"
+      },
+      {
+        "rule": "上一章已关闭的读取窗口只能展开或查看仍保留的只读监测列表；不得写成重新点开、重新开启、重新授权或设备主动响应。",
+        "state": "closed_read_only_window"
+      }
+    ],
+    "new_stage_delta": [],
+    "primary_action": {},
+    "recording_action_rules": {
+      "allowed_default": [
+        "界面内记录",
+        "口述复述",
+        "纯观察",
+        "item_state_ledger 已登记且已在场的设备"
+      ],
+      "mode": "no_new_physical_record_artifact",
+      "requires_matching_ledger": [
+        "笔记本",
+        "纸张",
+        "纸面",
+        "记录页",
+        "笔",
+        "便签",
+        "原件",
+        "副本",
+        "附件",
+        "文件夹"
+      ],
+      "rule": "记录、保存或留存信息的剧情动作不得自动新增具体实体物品；只有 item_state_ledger 明确登记对应物品且本章动作允许，才能描写该物品的持有、书写、翻页、拍摄或转移。"
+    },
+    "required_events": [],
+    "state_boundary_rules": [
+      {
+        "current_scope": "以撤回、关闭、失效或锁定状态为准",
+        "inherited_scope": "历史授权范围/可见字段说明",
+        "rule": "历史权限范围不得写成当前仍可使用的权限；当前权限状态优先于授权时长和可见字段列表。",
+        "state": "authorization"
+      },
+      {
+        "rule": "上一章已关闭或封存的读取/访问窗口，本章只能确认其封存状态；重新开启必须明确操作人、范围和关闭过程。",
+        "state": "post_closure_window"
+      },
+      {
+        "rule": "同一倒计时沿用上一章状态并单向递减；数值回升必须明确标注重置、校准或新周期。",
+        "state": "countdown_monotonic"
+      },
+      {
+        "rule": "同一章节同一倒计时周期只保留一个精确数值；后续只能写继续递减或事件推进。新的精确值必须明确标注重置、校准或新周期。",
+        "state": "single_precise_countdown"
+      },
+      {
+        "current_change_source": "current_chapter_contract.state_changes",
+        "inherited_state_source": "chapter_handoff.inherited_state",
+        "rule": "handoff.inherited_state 是本章开场已经成立的当前状态；不得把同一状态写成再次发生的变化。只有明确的本章动作、撤回、转移、重置或新周期才能改变它。",
+        "state": "inherited_current_state"
+      },
+      {
+        "rule": "界面读取、展开、确认或接受历史内容只能改变可见信息，不能直接产生开门、授权、控制链执行或实体影响；实体变化必须有角色明确的物理动作或直接反馈，机制不明时保持 observation/unknown。",
+        "state": "read_only_action_ownership"
+      }
+    ],
+    "state_changes": [],
+    "uncertain_events": [],
+    "unique_action_ledger": [],
+    "unknown_boundary": []
+  },
+  "dramatic_turn": {
+    "beats": [],
+    "choice": "",
+    "consequence": "",
+    "emotional_arc": "",
+    "goal": "",
+    "pressure": "",
+    "primary_character": ""
+  }
+}
