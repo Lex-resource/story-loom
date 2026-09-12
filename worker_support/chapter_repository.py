@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.novel import Chapter, ChapterOutline, RawIssue
 from services.pipeline_transitions import set_chapter_pipeline_step
 from services.pipeline_types import PipelineStep
+from core.pipeline_vocab import ChapterStatus
 
 
 async def get_chapter_by_index(
@@ -60,7 +61,7 @@ async def prepare_chapter_for_step(
 
     if chapter:
         if start_step not in ["validator", "extractor"]:
-            chapter.status = "draft"
+            chapter.status = ChapterStatus.DRAFT
             set_chapter_pipeline_step(chapter, pipeline_step)
         return chapter
 

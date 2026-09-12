@@ -27,6 +27,7 @@ from services.continuity_contract import (
     sanitize_outline_for_contract,
 )
 from worker_support.validation import run_comprehensive_validation, run_quick_validation
+from core.pipeline_vocab import ChapterStatus
 
 
 async def run_context_comprehensive_validation(
@@ -198,7 +199,7 @@ async def run_final_validator_flow(
             # 保留失败结论并暂停，等待人工处理；否则 attempt 边会把失败稿
             # 送进 publish，形成“拦截后自动跳过”的假通过。
             validator_result["terminal_block"] = True
-            chapter.status = "draft"
+            chapter.status = ChapterStatus.DRAFT
             chapter.error = json.dumps(validator_result.get("errors", []), ensure_ascii=False)
             await db.commit()
             await events.status(

@@ -28,6 +28,7 @@ from services.validator import analyze_style
 from services.experiment_recorder import record_event
 from services.continuity_contract import prompt_outline_for_agent
 from services.quality_metrics import quality_summary
+from core.pipeline_vocab import ChapterStatus
 
 
 def _polisher_gate(validator_result: dict) -> dict:
@@ -336,7 +337,7 @@ async def _terminal_block_outcome(
 ) -> PostEditValidationOutcome:
     """重写预算耗尽后的停机:置 terminal_block、暂停章节,不强制发布。"""
     validator_result["terminal_block"] = True
-    chapter.status = "draft"
+    chapter.status = ChapterStatus.DRAFT
     chapter.error = validation_errors
     await db.commit()
     await events.status(AGENT_VALIDATOR, chapter_index, reason)

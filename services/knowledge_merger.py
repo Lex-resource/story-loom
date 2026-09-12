@@ -49,6 +49,7 @@ from services.novel_memory_scenes import aggregate_scene_block
 from services.narrative_index import sync_narrative_index
 from services.chapter_continuity import build_chapter_handoff
 from services.memory_manager import MemoryManager
+from core.source_refs import chapter_source_ref
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +343,7 @@ async def _promote_and_publish(
             },
             open_questions=open_questions,
             recent_changes=recent_changes,
-            source_ref=f"chapter:{chapter_index}:scene",
+            source_ref=chapter_source_ref(chapter_index, "scene"),
             source_chapter=chapter_index,
             valid_from_chapter=chapter_index,
         )

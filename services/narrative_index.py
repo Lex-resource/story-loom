@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.narrative_index import NarrativeIndexEntry
 from services.novel_memory_types import STORYLINE_MAIN
+from core.source_refs import chapter_source_ref
 
 
 _NARRATIVE_NAMESPACE = uuid.UUID("5b3f8b7f-6f3c-4cb1-9c62-31b08fbbf2cc")
@@ -116,12 +117,12 @@ def build_narrative_projections(
     handoff = _as_dict(handoff)
     extractor_output = _as_dict(extractor_output)
     stage_key = _stage_key(outline)
-    source_ref = f"chapter:{chapter_index}:narrative_projection"
+    source_ref = chapter_source_ref(chapter_index, "narrative_projection")
     projections: list[NarrativeProjection] = []
     stage_content = _item_text(outline.get("summary")) or _item_text(handoff.get("next_hook"))
     projections.append(NarrativeProjection(
         entry_type="stage_summary", entry_key=stage_key, title=stage_key.split(":", 1)[-1],
-        content=stage_content, target_key=f"chapter:{chapter_index}", relation="stage_to_chapter",
+        content=stage_content, target_key=chapter_source_ref(chapter_index), relation="stage_to_chapter",
         chapter_index=chapter_index, chapter_end=chapter_index, source_ref=source_ref,
         source_chapter=chapter_index, data={"plotline": outline.get("plotline") or "mainline"},
     ))
@@ -138,7 +139,7 @@ def build_narrative_projections(
         content = _item_text(item)
         if not content:
             continue
-        segment_key = f"chapter:{chapter_index}:segment:{index}"
+        segment_key = chapter_source_ref(chapter_index, "segment", index)
         segment_keys.append(segment_key)
         projections.append(NarrativeProjection(
             entry_type="story_segment", entry_key=segment_key, title=f"第{chapter_index}章段落 {index}",
@@ -153,11 +154,11 @@ def build_narrative_projections(
         content = _item_text(item)
         if not content:
             continue
-        event_key = f"chapter:{chapter_index}:event:{index}"
+        event_key = chapter_source_ref(chapter_index, "event", index)
         segment_key = segment_keys[min(index - 1, len(segment_keys) - 1)] if segment_keys else None
         projections.append(NarrativeProjection(
             entry_type="story_event", entry_key=event_key, title=f"第{chapter_index}章事件 {index}",
-            content=content, parent_key=f"chapter:{chapter_index}", target_key=segment_key,
+            content=content, parent_key=chapter_source_ref(chapter_index), target_key=segment_key,
             relation="event_to_chapter", chapter_index=chapter_index, chapter_end=chapter_index,
             sequence=index, source_ref=source_ref, source_chapter=chapter_index,
             data={"raw": item, "stage_key": stage_key},

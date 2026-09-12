@@ -13,6 +13,7 @@ from services.runtime_tunables_service import get_value
 from sqlalchemy.ext.asyncio import AsyncSession
 from worker_support.events import GenerationEvents
 from services.knowledge_merger import run_post_processing
+from core.pipeline_vocab import ChapterStatus, JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ async def run_chapter_post_processing(
     events: GenerationEvents,
 ) -> None:
     await check_paused(db, job.id)
-    chapter.status = "post_processing"
+    chapter.status = ChapterStatus.POST_PROCESSING
     set_chapter_pipeline_step(chapter, PipelineStep.EXTRACTING)
     await db.commit()
 
@@ -73,7 +74,7 @@ async def run_chapter_post_processing(
             chapter.status = ChapterStatus.POSTPROCESS_FAILED
             set_chapter_pipeline_step(chapter, PipelineStep.EXTRACTING, update_status=False)
             chapter.error = message
-            job.status = "failed"
+            job.status = JobStatus.FAILED
             job.current_step = AGENT_EXTRACTOR
             append_job_error(job, message, chapter=chapter_index, step=AGENT_EXTRACTOR)
             novel.status = NovelStatus.PAUSED
@@ -97,7 +98,7 @@ async def run_chapter_post_processing(
     await db.refresh(chapter)
     if chapter.status == ChapterStatus.PENDING_REVIEW:
         novel.status = NovelStatus.PAUSED
-        job.status = "paused"
+        job.status = JobStatus.PAUSED
         job.current_step = "extractor"
         await db.commit()
         await events.status(

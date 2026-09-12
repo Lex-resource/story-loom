@@ -83,6 +83,7 @@ async def create_project(data: CreateProjectRequest, db: AsyncSession = Depends(
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
+@router.delete("/project/{project_id}")
 async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
     """Stop local tasks before the service removes their durable Job rows."""
     pid = parse_project_id(project_id)
@@ -95,7 +96,6 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
-router.add_api_route("/project/{project_id}", delete_project, methods=["DELETE"])
 @router.get("/{project_id}/status")
 async def get_status(project_id: str, db: AsyncSession = Depends(get_db)):
     try:

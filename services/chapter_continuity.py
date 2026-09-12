@@ -19,6 +19,7 @@ from models.novel_memory import NovelMemoryAtom, NovelSceneBlock
 from services.context_compaction import compact_json, compact_text
 from services.novel_memory_types import ATOM_STATUS_ACCEPTED, STORYLINE_MAIN
 from services.chapter_handoff_formatting import ChapterHandoffFormattingMixin
+from core.source_refs import chapter_source_ref
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -677,7 +678,7 @@ async def build_chapter_handoff(
         unknown_boundary=unknown_boundary,
         sources=atom_sources + scene_sources + [{
             "type": "chapter",
-            "source_ref": f"chapter:{previous_index}",
+            "source_ref": chapter_source_ref(previous_index),
             "chapter": previous_index,
         }],
     )

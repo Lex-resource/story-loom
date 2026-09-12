@@ -58,6 +58,7 @@ async def resume(project_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
+@router.post("/{project_id}/rewrite")
 async def rewrite(project_id: str, data: RewriteRequest, db: AsyncSession = Depends(get_db)):
     """rewrite 会把 RUNNING 的 generate job 复位 PENDING 供重新抢占。
 
@@ -81,4 +82,3 @@ async def rewrite(project_id: str, data: RewriteRequest, db: AsyncSession = Depe
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
-router.add_api_route("/{project_id}/rewrite", rewrite, methods=["POST"])

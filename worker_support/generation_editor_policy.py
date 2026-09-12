@@ -13,6 +13,7 @@ from services.pipeline_types import PipelineStep
 from services.project_stats import chapter_chars_from_row
 from worker_support.validation import min_score_from_evaluations, resolve_editor_decision
 from services.experiment_recorder import record_content_retry
+from core.pipeline_vocab import ChapterStatus
 
 _HARD_EDITOR_CATEGORIES = {
     "logic",
@@ -117,7 +118,7 @@ def mark_editor_rewrite(
         },
         ensure_ascii=False,
     )
-    chapter.status = "draft"
+    chapter.status = ChapterStatus.DRAFT
     record_content_retry(rewrite_reason, rewrite_instructions)
 
 
@@ -138,6 +139,6 @@ def force_save_after_quick_validation_failure(chapter) -> None:
     chapter.error = None
     chapter.content = chapter.edited_content or chapter.draft_content
     chapter.word_count = chapter_chars_from_row(chapter)
-    chapter.status = "validated"
+    chapter.status = ChapterStatus.VALIDATED
     set_chapter_pipeline_step(chapter, PipelineStep.VALIDATING)
     chapter.force_corrected = True

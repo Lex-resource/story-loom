@@ -28,6 +28,8 @@
 """
 from __future__ import annotations
 
+from core.pipeline_vocab import ChapterStatus
+
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -503,7 +505,7 @@ async def run_final(state: ChapterRunState, node: Any = None) -> str:
     skip_revalidation = (
         state.start_step == AGENT_EXTRACTOR
         and state.chapter is not None
-        and state.chapter.status in ["validated", "post_processing"]
+        and state.chapter.status in (ChapterStatus.VALIDATED, ChapterStatus.POST_PROCESSING)
     )
     if skip_revalidation:
         state.validator_result = state.chapter.validator_result or {"passed": True}

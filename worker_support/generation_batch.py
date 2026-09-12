@@ -7,6 +7,7 @@ from services.chapter_progress import all_target_chapters_published, find_next_w
 from services.job_payload import get_job_params, set_job_params
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from core.pipeline_vocab import NovelStatus
 
 
 async def find_next_chapter_for_job(
@@ -60,7 +61,7 @@ async def decrement_remaining_chapters(db: AsyncSession, job: Job) -> None:
 
 async def update_novel_status_on_finished(db: AsyncSession, novel: Novel) -> None:
     if not novel.target_chapters:
-        novel.status = "paused"
+        novel.status = NovelStatus.PAUSED
         return
 
     ch_res = await db.execute(
@@ -68,6 +69,6 @@ async def update_novel_status_on_finished(db: AsyncSession, novel: Novel) -> Non
         .where(Chapter.novel_id == novel.id, Chapter.chapter_index <= novel.target_chapters)
     )
     if all_target_chapters_published(ch_res.all(), novel.target_chapters):
-        novel.status = "completed"
+        novel.status = NovelStatus.COMPLETED
     else:
-        novel.status = "paused"
+        novel.status = NovelStatus.PAUSED

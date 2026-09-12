@@ -11,6 +11,7 @@ from services.experiment_recorder import record_content_retry
 from services.validation_constants import RETRYABLE_CATEGORIES, is_fact_conflict_issue
 from services.version_surface import NO_OVERRIDE, research_override
 from services.workflow_surface import NO_WORKFLOW_OVERRIDE, workflow_override
+from core.pipeline_vocab import ChapterStatus
 
 
 def validation_errors_text(result: dict[str, Any]) -> str:
@@ -315,7 +316,7 @@ def requires_content_retry(result: dict[str, Any], novel_format: str | None = No
 
 
 def mark_validator_retry(chapter, validator_result: dict[str, Any]) -> None:
-    chapter.status = "draft"
+    chapter.status = ChapterStatus.DRAFT
     set_chapter_pipeline_step(chapter, PipelineStep.WRITING)
     chapter.error = json.dumps(validator_result.get("errors", []), ensure_ascii=False)
     record_content_retry(
@@ -335,7 +336,7 @@ def force_save_validator_result(chapter, validator_result: dict[str, Any]) -> No
         "auto_force_saved": True,
     }
     set_chapter_pipeline_step(chapter, PipelineStep.VALIDATING)
-    chapter.status = "validated"
+    chapter.status = ChapterStatus.VALIDATED
     chapter.error = json.dumps(
         {
             "auto_force_saved": True,
@@ -350,7 +351,7 @@ def finalize_validated_chapter(chapter, validator_result: dict[str, Any]) -> Non
         chapter.error = None
     chapter.content = chapter.edited_content or chapter.draft_content
     chapter.word_count = validator_result.get("word_count", 0)
-    chapter.status = "validated"
+    chapter.status = ChapterStatus.VALIDATED
     set_chapter_pipeline_step(chapter, PipelineStep.VALIDATING)
 
 

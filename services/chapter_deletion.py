@@ -162,21 +162,24 @@ async def delete_related_chapter_rows(
                 CharacterChapterState.chapter_index == chapter_index,
             )
         )
-        for character_id in character_ids:
-            remaining_appearance = await db.scalar(
-                select(func.max(CharacterChapterState.chapter_index)).where(
-                    CharacterChapterState.character_id == character_id,
+        # 单条相关子查询:仅当被删章节是角色最后一次出场(last_appearance ==
+        # chapter_index)时,回填为剩余状态的最大章号(无则 NULL)。逐角色循环
+        # 会产生 N+1(森林 I1),这里一条语句完成同样的语义。
+        await db.execute(
+            update(CharacterCard)
+            .where(
+                CharacterCard.id.in_(character_ids),
+                CharacterCard.last_appearance == chapter_index,
+            )
+            .values(
+                last_appearance=select(func.max(CharacterChapterState.chapter_index))
+                .where(
+                    CharacterChapterState.character_id == CharacterCard.id,
                     CharacterChapterState.storyline_id == CHARACTER_STORYLINE_MAIN,
                 )
+                .scalar_subquery()
             )
-            await db.execute(
-                update(CharacterCard)
-                .where(
-                    CharacterCard.id == character_id,
-                    CharacterCard.last_appearance == chapter_index,
-                )
-                .values(last_appearance=remaining_appearance)
-            )
+        )
         await db.execute(
             update(CharacterArc)
             .where(

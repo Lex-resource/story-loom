@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from worker_support.chapter_repository import get_or_create_chapter
 from worker_support.events import GenerationEvents
 from services.knowledge_merger import run_post_processing
+from core.pipeline_vocab import ChapterStatus
 
 
 class JSONErrorRecoveryOutcome(StrEnum):
@@ -100,7 +101,7 @@ async def _schedule_editor_schema_rewrite(
     events: GenerationEvents,
 ) -> None:
     """把可用正文退回 Writer，修复 Editor schema 输出，而不是强制放行。"""
-    chapter.status = "draft"
+    chapter.status = ChapterStatus.DRAFT
     chapter.edited_content = None
     chapter.error = json.dumps(
         {
@@ -138,7 +139,7 @@ async def _fail_after_editor_schema_rewrite(
     """一次自动重写后仍无法得到 Editor 结构化结果时，安全停下等待人工处理。"""
     StateMachine.fail_job(job)
     novel.status = NovelStatus.PAUSED
-    chapter.status = "failed"
+    chapter.status = ChapterStatus.FAILED
     chapter.error = json.dumps(
         {
             "editor_schema_rewrite_failed": True,
@@ -167,7 +168,7 @@ async def _mark_retry(
     error: LLMJSONParsingError,
     events: GenerationEvents,
 ) -> None:
-    chapter.status = "draft"
+    chapter.status = ChapterStatus.DRAFT
     chapter.error = json.dumps(
         {
             "auto_retry": True,
@@ -216,7 +217,7 @@ async def _force_save_usable_text(
     )
     chapter.word_count = chapter_chars_from_row(chapter)
     set_chapter_pipeline_step(chapter, PipelineStep.VALIDATING)
-    chapter.status = "validated"
+    chapter.status = ChapterStatus.VALIDATED
     await db.commit()
     await run_post_processing(db, novel_id, chapter_index)
 
@@ -232,7 +233,7 @@ async def _fail_without_usable_text(
 ) -> None:
     StateMachine.fail_job(job)
     novel.status = NovelStatus.PAUSED
-    chapter.status = "failed"
+    chapter.status = ChapterStatus.FAILED
     chapter.error = error.raw_response
     await db.commit()
     try:
