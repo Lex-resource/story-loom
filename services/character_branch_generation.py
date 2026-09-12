@@ -11,6 +11,7 @@ from config import settings
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agents.constants import AGENT_EXTRACTOR
 from agents.pipeline_context import PipelineContext
 from database import async_session
 from models.character_branches import CharacterBranch, CharacterBranchChapter
@@ -23,6 +24,10 @@ from services.character_branch_service import (
 from services.character_branch_vector_service import enqueue_branch_chapter_vector
 from services.novel_memory_evidence import capture_branch_generation_evidence
 from services.novel_memory_consolidation import consolidate_scene_summary
+from services.knowledge_patch_models import KnowledgePatchSet
+from services.novel_memory_atoms import record_patch_atoms
+from services.novel_memory_evidence import capture_chapter_extractor_evidence
+from services.novel_memory_recall import recall_novel_memory
 from services.novel_memory_scenes import aggregate_scene_block, fallback_scene_summary
 from services.character_constants import (
     CHARACTER_BRANCH_CHAPTER_STATUS_FAILED,
@@ -229,6 +234,19 @@ async def process_character_branch_job(
                 db, job, branch_id, character_id, lock=False
             )
             context = _branch_context(branch, chapter, novel, previous)
+            if settings.ENABLE_NOVEL_MEMORY_RECALL:
+                # A2:支线自身累积记忆的召回(锚点前的主线记忆已冻结在
+                # anchor_context);后续续写章节据此看到前几章支线事实。
+                recall = await recall_novel_memory(
+                    db,
+                    project_id=novel.id,
+                    chapter_index=next_index,
+                    agent_type="writer",
+                    branch_id=branch.id,
+                    storyline_id=branch.storyline_id,
+                    query_text=str(chapter.title or ""),
+                )
+                context.novel_memory_context = recall.context
             await _broadcast(branch, f"正在规划支线第{next_index}章")
 
             planner_output = await planner_node.run(context, {"skeleton": context.global_outline})
@@ -311,6 +329,51 @@ async def process_character_branch_job(
             chapter.error = None
             branch.current_chapter_index = next_index
             branch.status = CHARACTER_BRANCH_STATUS_DRAFT
+            # B1:支线域记忆提取(与主链同一提取器,写入支线域;
+            # 跳过角色卡/教义/叙事索引——权威模型不变)
+            extractor_output = None
+            if settings.ENABLE_NOVEL_MEMORY_ATOMS:
+                try:
+                    from agents.pipeline import ExtractorNode
+
+                    extraction_context = copy.copy(context)
+                    extraction_context.chapter_content = chapter.content or ""
+                    extractor_node = ExtractorNode()
+                    extractor_output = await extractor_node.run(
+                        extraction_context, {"content": chapter.content}
+                    )
+                    await extractor_node.agent.record_usage(
+                        db, novel.id, next_index, AGENT_EXTRACTOR
+                    )
+                except Exception:
+                    logger.exception(
+                        "branch_memory_extraction_failed branch_id=%s chapter_index=%s",
+                        branch.id,
+                        next_index,
+                    )
+            branch_atoms = []
+            if extractor_output is not None:
+                evidence = None
+                if settings.ENABLE_NOVEL_MEMORY_EVIDENCE:
+                    evidence = await capture_chapter_extractor_evidence(
+                        db,
+                        project_id=novel.id,
+                        branch_id=branch.id,
+                        storyline_id=branch.storyline_id,
+                        chapter_index=next_index,
+                        chapter_content=chapter.content or "",
+                        extractor_output=extractor_output,
+                    )
+                if settings.ENABLE_NOVEL_MEMORY_ATOMS:
+                    branch_atoms = await record_patch_atoms(
+                        db,
+                        project_id=novel.id,
+                        chapter_index=next_index,
+                        patch_set=KnowledgePatchSet.model_validate(extractor_output),
+                        evidence_id=evidence.id if evidence is not None else None,
+                        branch_id=branch.id,
+                        storyline_id=branch.storyline_id,
+                    )
             if settings.ENABLE_NOVEL_MEMORY_EVIDENCE:
                 await capture_branch_generation_evidence(
                     db,
@@ -333,7 +396,7 @@ async def process_character_branch_job(
                         if settings.ENABLE_SCENE_BLOCK_CONSOLIDATION:
                             branch_summary = (
                                 await consolidate_scene_summary(
-                                    db, novel, chapter, branch_summary, accepted_atoms=[],
+                                    db, novel, chapter, branch_summary, accepted_atoms=branch_atoms,
                                 )
                                 or branch_summary
                             )
