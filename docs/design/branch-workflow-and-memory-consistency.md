@@ -197,3 +197,31 @@ class ChapterDomain:
 6. **E6**:验证:支线生命周期测试 + 全量 + grep 复核无残留主线直调。
 
 工作量:1-2 个会话。每步全量测试,golden trace 全程红线。
+
+### E5 精确实施规格(2026-09-12 探查定稿,下一步执行)
+
+1. **节点参数移除**:`process_character_branch_job(db, job, *, planner_node, writer_node,
+   editor_node, validator_node)` → `(db, job)`。适配器自持节点(注册表),
+   调用方 `worker_support/character_branch_job.py` 同步改。
+2. **state 新字段**:`ChapterRunState.domain_artifacts: dict | None = None`
+   (postprocess 角色把支线原子带出图外,供 job 尾部场景块整合)。
+3. **runtime/graph 来源**:`get_pipeline_config(db, novel.novel_format)` →
+   PipelineConfig(config.graph 即 ChapterGraph;max_rewrite/has_extractor 同源)。
+4. **循环体改造**(保留章节循环与 checkpoint 脚手架):
+   - domain = ChapterDomain(novel.id, branch.id, branch.storyline_id, branch.anchor_main_chapter)
+   - context = _branch_context(...) + 支线域召回(A2 已就位)
+   - planner_inputs = prepare_planner_inputs(db, novel, next_index, None,
+     domain=domain, previous_ending_override=context.previous_ending)
+   - state = ChapterRunState(..., chapter=chapter, domain=domain,
+     pipeline_context=context, memory=planner_inputs.memory,
+     skeleton=context.global_outline, issue_summaries=..., ...)
+   - outcome = await run_chapter_graph(state, config.graph)
+5. **postprocess/publish 域守卫已就位**(E5a):postprocess →
+   apply_branch_chapter_memory + state.domain_artifacts 回填;
+   publish → finalize 只动支线章节行(支线状态枚举由 job 尾部归位)。
+6. **job 尾部语义**:blocked → 支线/job FAILED(同手写);正常 →
+   chapter READY + branch.current_chapter_index + 场景块
+   (atoms 取 state.domain_artifacts)→ checkpoint → 下一章。
+7. **删除**:手写四步 + rewrite 循环(由图裁决边承接,获得重写预算语义)。
+8. **验证**:test_character_branch_lifecycle + 全量;grep 复核
+   process_character_branch_job 无 _node.run 残留。
