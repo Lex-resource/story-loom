@@ -160,12 +160,12 @@ def _install(
 
     _patch(monkeypatch, "load_generation_pipeline_runtime", load_runtime)
 
-    async def get_chapter(db, novel_id, idx):
+    async def get_chapter(db, novel_id, idx, **_kwargs):
         return chapter
 
     _patch(monkeypatch, "get_chapter_by_index", get_chapter)
 
-    async def prep_chapter(db, ch, novel_id, idx, step):
+    async def prep_chapter(db, ch, novel_id, idx, step, **_kwargs):
         trace.add(f"chapter.prepare:{step}")
         return chapter
 

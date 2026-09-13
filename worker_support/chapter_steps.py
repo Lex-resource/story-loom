@@ -247,7 +247,7 @@ async def run_context_refresh(state: ChapterRunState, node: Any = None) -> str:
 async def run_draft(state: ChapterRunState, node: Any = None) -> str:
     """写初稿。重写时把上一版的校验错误作为修改指令带进去。"""
     prev_chapter = await get_chapter_by_index(
-        state.db, state.novel.id, state.chapter_index
+        state.db, state.novel.id, state.chapter_index, domain=state.domain
     )
     rewrite_instructions = rewrite_instructions_for_writer(
         state.custom_prompt,
@@ -518,7 +518,7 @@ async def run_final(state: ChapterRunState, node: Any = None) -> str:
         )
         state.chapter = await get_chapter_by_index(
             state.db, state.novel.id, state.chapter_index
-        )
+        , domain=state.domain)
         if state.latest_validator_result is not None:
             state.validator_result = state.latest_validator_result
         else:

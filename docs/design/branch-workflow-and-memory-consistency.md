@@ -175,9 +175,14 @@ class ChapterDomain:
     storyline_id: str = "main"
 ```
 
-1. **E1**:chapter_repository 全函数签名 `(db, novel_id, chapter_index)` →
-   `(db, domain: ChapterDomain, chapter_index)`;内部按 branch_id 分派
-   Chapter 表 / CharacterBranchChapter 表。主线行为零变化(trace 保护)。
+1. **E1 ✅**:ChapterDomain 落地 core/chapter_domain.py;仓库全函数加
+   `domain` 关键字(默认 None=主线,零破坏);支线域特化(状态枚举/大纲直写/
+   RawIssue 跳过);4 个域分派单测。提交 4752ad3(amend 后)。
+   **E2 细分**:①chapter_run_state 加 domain 字段 → ②generate_job_runner
+   落 mainline_domain → ③chapter_steps 两处调用传 state.domain →
+   ④四个 flow 文件(generation_outline/writer_flow/planner_flow/editor_flow
+   + json_error_recovery)加 domain 参数并由适配器穿入 → ⑤chapter_service
+   (routers 面)保持主线。
 2. **E2**:适配器与 flows 经 `state.domain` 调用(codegraph 清单逐点替换)。
 3. **E3**:MemoryManager 支线召回模式(支线域 ∪ 锚点快照,已在 B1 验证可行)。
 4. **E4**:postprocess 按 domain 分派:主线 → run_post_processing(现状);

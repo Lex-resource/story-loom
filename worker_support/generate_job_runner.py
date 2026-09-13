@@ -39,6 +39,7 @@ from worker_support.chapter_graph_runner import (
     OUTCOME_RETRY,
     run_chapter_graph,
 )
+from core.chapter_domain import mainline_domain
 from worker_support.chapter_repository import (
     get_chapter_by_index,
     prepare_chapter_for_step,
@@ -95,7 +96,8 @@ async def _process_single_chapter(
     await check_paused(db, job.id)
     job.current_chapter = next_chapter
 
-    chapter = await get_chapter_by_index(db, novel.id, next_chapter)
+    domain = mainline_domain(novel.id)
+    chapter = await get_chapter_by_index(db, novel.id, next_chapter, domain=domain)
     if chapter and chapter.status == ChapterStatus.PENDING_REVIEW:
         job.current_step = chapter.pipeline_step or job.current_step or AGENT_EXTRACTOR
         StateMachine.pause_job(job, novel=novel)
@@ -111,7 +113,7 @@ async def _process_single_chapter(
     start_step = start_state.start_step
     set_job_step(job, start_step, chapter, allow_resume=True)
 
-    chapter = await prepare_chapter_for_step(db, chapter, novel.id, next_chapter, start_step)
+    chapter = await prepare_chapter_for_step(db, chapter, novel.id, next_chapter, start_step, domain=domain)
 
     await db.commit()
     project_id_str = str(novel.id)
@@ -131,6 +133,7 @@ async def _process_single_chapter(
         custom_prompt=start_state.custom_prompt,
         prompt_category=getattr(runtime, "prompt_category", None),
         chapter=chapter,
+        domain=domain,
     )
     _bind_stream_callbacks(state)
 

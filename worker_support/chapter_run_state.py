@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from core.chapter_domain import ChapterDomain
 from typing import Any, Callable
 
 # 裁决词表与角色名的唯一来源在 `services/pipeline_stages` —— 图校验器（services/，不得
@@ -53,6 +55,8 @@ class ChapterRunState:
     start_step: str = "planner"
     use_existing_outline: bool = False
     custom_prompt: str | None = None
+    # 叙事域:None=主线;支线 job 携带支线域,仓库/上下文按此分派
+    domain: ChapterDomain | None = None
     # 提示词 category 覆盖（工作流「复用别人的提示词」时非空）。解释器把它连同节点的
     # 提示词覆盖一起装进 `services/prompt_scope` 的作用域。
     prompt_category: str | None = None
