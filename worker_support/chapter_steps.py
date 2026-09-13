@@ -566,6 +566,13 @@ async def run_publish(state: ChapterRunState, node: Any = None) -> str:
     人工复核。这与 ``final`` 的 ``blocked``（尚未落定就拦下）是两件事，顺序反了会丢稿。
     支线域：finalize 只动支线章节行；主线 novel 计数由支线 job 自己维护。
     """
+    if state.domain is not None and state.domain.is_branch:
+        # K4:支线域不写主线状态值/步骤属性,只收敛内容与字数;
+        # 状态归位(READY)由 job 尾部处理。
+        state.chapter.content = state.chapter.edited_content or state.chapter.draft_content
+        state.chapter.word_count = state.validator_result.get("word_count", 0)
+        await state.db.commit()
+        return VERDICT_OK
     finalize_validated_chapter(state.chapter, state.validator_result)
     await state.db.commit()
 

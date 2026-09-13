@@ -121,10 +121,6 @@ async def process_character_branch_job(
                 domain=domain,
                 previous_ending_override=context.previous_ending,
             )
-            from worker_support.generate_job_runner import _bind_stream_callbacks
-            from worker_support.chapter_graph_runner import run_chapter_graph
-            from services.chapter_graph import branch_default_graph
-
             state = ChapterRunState(
                 db=db,
                 job=job,
