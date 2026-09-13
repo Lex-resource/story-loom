@@ -92,6 +92,7 @@ from services.pipeline_stages import (
     ROLE_REVIEW,
     ROLE_STYLE_REPAIR,
 )
+from types import SimpleNamespace
 
 # 系统角色：没有提示词、不可被用户从工作流里删掉。
 SYSTEM_ROLES: frozenset[str] = frozenset({ROLE_CONTEXT_REFRESH, ROLE_PUBLISH})
@@ -563,6 +564,7 @@ async def run_publish(state: ChapterRunState, node: Any = None) -> str:
 
     ``auto_force_saved`` 时返回 ``blocked``：正文**已经**落定（不能丢），但要暂停等
     人工复核。这与 ``final`` 的 ``blocked``（尚未落定就拦下）是两件事，顺序反了会丢稿。
+    支线域：finalize 只动支线章节行；主线 novel 计数由支线 job 自己维护。
     """
     finalize_validated_chapter(state.chapter, state.validator_result)
     await state.db.commit()
@@ -589,6 +591,21 @@ async def run_postprocess(state: ChapterRunState, node: Any = None) -> str:
     不跑设定提取。把它实现成「图里不含本步」会导致章节永远发布不了。
     """
     from worker_support.orchestrator import check_paused
+
+    if state.domain is not None and state.domain.is_branch:
+        # 支线域:记忆提取走支线路径(证据+原子,场景块由 job 收尾写),
+        # 不做主线发布/角色卡/教义/叙事索引。
+        from services.character_branch_generation import apply_branch_chapter_memory
+
+        branch_atoms = await apply_branch_chapter_memory(
+            state.db,
+            novel=state.novel,
+            branch=SimpleNamespace(id=state.domain.branch_id, storyline_id=state.domain.storyline_id),
+            chapter=state.chapter,
+            context=state.pipeline_context,
+        )
+        state.domain_artifacts = {"branch_atoms": branch_atoms}
+        return VERDICT_OK
 
     await run_chapter_post_processing(
         state.db,

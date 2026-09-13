@@ -253,6 +253,61 @@ DEFAULT_BUDGETS: dict[str, Budget] = {
 }
 
 
+def branch_default_graph(*, max_rewrites: int = 2) -> ChapterGraph:
+    """支线域的默认拓扑:规划 → 写作 → 审阅(可回写) → 终审 → 落定 → 支线记忆。
+
+    与 default_graph 同一套原语与裁决词表,差异:
+    - 无 context_refresh/style_repair/force_revise/post_edit(支线不需要主线的
+      全套精修簇);
+    - postprocess 角色在支线域执行支线记忆提取(适配器按 domain 分派);
+    - 无 VERDICT_EMPTY 暂停(plan 为空由支线大纲兜底)。
+
+    预算沿用 rewrite 预算语义:review 的回写边受 max_rewrites 约束。
+    """
+    steps: dict[str, Step] = {
+        "plan": Step(
+            id="plan",
+            role=ROLE_OUTLINE,
+            next=Edge("draft"),
+        ),
+        "draft": Step(
+            id="draft",
+            role=ROLE_DRAFT,
+            next=Edge("review"),
+        ),
+        "review": Step(
+            id="review",
+            role=ROLE_REVIEW,
+            next=Edge("final"),
+            on={
+                VERDICT_REWRITE: Edge(
+                    "draft",
+                    budget=BUDGET_REWRITE,
+                    on_exhausted="final",
+                ),
+            },
+        ),
+        "final": Step(
+            id="final",
+            role=ROLE_FINAL,
+            next=Edge("publish"),
+        ),
+        "publish": Step(
+            id="publish",
+            role=ROLE_PUBLISH,
+            next=Edge("post"),
+        ),
+        "post": Step(
+            id="post",
+            role=ROLE_POSTPROCESS,
+            next=Edge(TARGET_DONE),
+        ),
+    }
+    return ChapterGraph(steps=steps)
+
+
+
+
 def default_graph(
     *,
     has_editor: bool = True,

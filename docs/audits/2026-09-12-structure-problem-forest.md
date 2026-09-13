@@ -18,7 +18,7 @@
 | A | A3 来源引用模板 | ✅ core.source_refs 统一,3 文件 7 处收敛 | P2 |
 | A | A1 延迟导入提升 | ✅ AST 祖先链工具(只提升纯函数作用域导入,if/try 内不动):10 文件 31 处提升 + 3 个测试补丁改打使用处 + 修复 P1 引入的 worker.py 入口破坏(orchestrator 再导出恢复并加 noqa 豁免)。orchestrator/worker_admin 为再导出或 fixture 耦合文件,豁免提升 | P6-A1 |
 | B | B3/B4 场景块回退重复+能力缺失 | ✅ fallback_scene_summary 共享;支线接入整合开关 | P4 |
-| B | B1/B2/B5 支线收编图执行器 | ⬜ 特性级重写,单独排期(先建支线 trace) | — |
+| B | B1/B2/B5 支线收编图执行器 | ✅ 手写四步编排删除;支线 job 走 run_chapter_graph + branch_default_graph 子图(复用引擎/裁决边/预算);支线域记忆管线完整(证据+原子+场景块);域守卫隔离主线。**前置仓库层重构以 ChapterDomain 域参数化方式解决(E1-E2)** | E5 系列 |
 | C | C4 特征测试 | ✅ contract_builder_characterization 逐字节锁定(25 键) | P5-C1 |
 | C | C1 build_chapter_contract | ✅ 拆 6 阶段构建器,字节一致(特征测试当场抓到 V12 遗漏) | P5-C1 |
 | C | C2 contract_prompt | ✅ 发现 return 后 142 行不可达死代码(三个历史版本),清除后 250→105 行,快照字节一致。**新类别:return 后不可达代码,历次 AST 扫描均未覆盖** | P5-C2 |

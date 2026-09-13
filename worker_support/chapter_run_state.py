@@ -57,6 +57,8 @@ class ChapterRunState:
     custom_prompt: str | None = None
     # 叙事域:None=主线;支线 job 携带支线域,仓库/上下文按此分派
     domain: ChapterDomain | None = None
+    # 支线域角色带出图外的产物(postprocess 回填,job 尾部消费)
+    domain_artifacts: dict | None = None
     # 提示词 category 覆盖（工作流「复用别人的提示词」时非空）。解释器把它连同节点的
     # 提示词覆盖一起装进 `services/prompt_scope` 的作用域。
     prompt_category: str | None = None
