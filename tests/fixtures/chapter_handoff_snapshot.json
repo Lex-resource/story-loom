@@ -47,12 +47,55 @@
       "能力、权限、中继和运行状态只代表当前证据命题；不得从一次响应推断永久能力、执行者或因果来源。",
       "署名、来源、相似身份和时间相邻只代表证据关联；不得写成本人留下、本人执行或身份已核验。"
     ],
-    "evidence_state_ledger": [],
+    "evidence_state_ledger": [
+      {
+        "allowed_claim": "只能复述当前命题或描写核对/观察，不得升级为身份、归属、执行、能力或因果确认。",
+        "authority": "accepted",
+        "evidence_kind": "capability",
+        "memory_key": "key:白色灯塔的真正功",
+        "proposition": "白色灯塔的真正功能尚未确认",
+        "source_chapter": 2,
+        "source_ref": "chapter:2",
+        "status": "accepted",
+        "subject": "白色灯塔的真正功"
+      }
+    ],
     "exact_ending": "林照停在白塔门前。",
     "foreshadowing": [
       "白色灯塔的真正功能尚未确认"
     ],
-    "inherited_state": [],
+    "inherited_state": [
+      {
+        "authority": "accepted",
+        "memory_key": "key:林照持有第九次潮",
+        "rule": "本章开场已经成立；只有明确的本章动作或新周期才能改变它。",
+        "scope": "inherited_current",
+        "source_chapter": 2,
+        "source_ref": "chapter:2",
+        "state": "",
+        "statement": "林照持有第九次潮汐记录副本"
+      },
+      {
+        "authority": "accepted",
+        "memory_key": "key:潮汐记录必须当日",
+        "rule": "本章开场已经成立；只有明确的本章动作或新周期才能改变它。",
+        "scope": "inherited_current",
+        "source_chapter": 2,
+        "source_ref": "chapter:2",
+        "state": "",
+        "statement": "潮汐记录必须当日登记"
+      },
+      {
+        "authority": "accepted",
+        "memory_key": "key:白色灯塔的真正功",
+        "rule": "本章开场已经成立；只有明确的本章动作或新周期才能改变它。",
+        "scope": "inherited_current",
+        "source_chapter": 2,
+        "source_ref": "chapter:2",
+        "state": "",
+        "statement": "白色灯塔的真正功能尚未确认"
+      }
+    ],
     "item_state_ledger": [],
     "next_hook": "林照停在白塔门前。",
     "open_questions": [
@@ -162,12 +205,55 @@
       "能力、权限、中继和运行状态只代表当前证据命题；不得从一次响应推断永久能力、执行者或因果来源。",
       "署名、来源、相似身份和时间相邻只代表证据关联；不得写成本人留下、本人执行或身份已核验。"
     ],
-    "evidence_state_ledger": [],
+    "evidence_state_ledger": [
+      {
+        "allowed_claim": "只能复述当前命题或描写核对/观察，不得升级为身份、归属、执行、能力或因果确认。",
+        "authority": "accepted",
+        "evidence_kind": "capability",
+        "memory_key": "key:白色灯塔的真正功",
+        "proposition": "白色灯塔的真正功能尚未确认",
+        "source_chapter": 2,
+        "source_ref": "chapter:2",
+        "status": "accepted",
+        "subject": "白色灯塔的真正功"
+      }
+    ],
     "exact_ending": "林照停在白塔门前,等待设备侧回执。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。潮水声持续了一整夜。",
     "foreshadowing": [
       "白色灯塔的真正功能尚未确认"
     ],
-    "inherited_state": [],
+    "inherited_state": [
+      {
+        "authority": "accepted",
+        "memory_key": "key:林照持有第九次潮",
+        "rule": "本章开场已经成立；只有明确的本章动作或新周期才能改变它。",
+        "scope": "inherited_current",
+        "source_chapter": 2,
+        "source_ref": "chapter:2",
+        "state": "",
+        "statement": "林照持有第九次潮汐记录副本"
+      },
+      {
+        "authority": "accepted",
+        "memory_key": "key:潮汐记录必须当日",
+        "rule": "本章开场已经成立；只有明确的本章动作或新周期才能改变它。",
+        "scope": "inherited_current",
+        "source_chapter": 2,
+        "source_ref": "chapter:2",
+        "state": "",
+        "statement": "潮汐记录必须当日登记"
+      },
+      {
+        "authority": "accepted",
+        "memory_key": "key:白色灯塔的真正功",
+        "rule": "本章开场已经成立；只有明确的本章动作或新周期才能改变它。",
+        "scope": "inherited_current",
+        "source_chapter": 2,
+        "source_ref": "chapter:2",
+        "state": "",
+        "statement": "白色灯塔的真正功能尚未确认"
+      }
+    ],
     "item_state_ledger": [],
     "next_hook": "林照停在白塔门前。",
     "open_questions": [

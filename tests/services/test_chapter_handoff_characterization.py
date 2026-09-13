@@ -1,7 +1,7 @@
-"""build_chapter_handoff 的特征测试(森林 C3:DB 密集函数的安全网)。
+"""build_chapter_handoff 的特征测试(森林 C3 收尾)。
 
-用序列式 fake session 驱动真实的查询顺序,把交接包输出逐字节冻结。
-拆分(查询编排 vs 纯装配)前后输出必须一致。
+用序列式 fake session 驱动真实查询顺序,把交接包输出逐字节冻结。
+查询编排与纯装配(`_assemble_chapter_handoff`)的边界重构必须保持字节一致。
 
 重新生成基线::
 
@@ -23,8 +23,8 @@ UPDATE = os.environ.get("HANDOFF_SNAPSHOT_UPDATE") == "1"
 PROJECT = uuid.uuid4()
 
 
-def _chapter_row(**over):
-    row = SimpleNamespace(
+def _chapter_row():
+    return SimpleNamespace(
         chapter_index=2,
         title="潮声",
         outline={
@@ -37,9 +37,6 @@ def _chapter_row(**over):
         edited_content=None,
         draft_content=None,
     )
-    for k, v in over.items():
-        setattr(row, k, v)
-    return row
 
 
 def _atom_row(atom_type, statement, chapter=2, version=1):
@@ -51,6 +48,8 @@ def _atom_row(atom_type, statement, chapter=2, version=1):
         source_ref=f"chapter:{chapter}",
         memory_key=f"key:{statement[:8]}",
         authority="accepted",
+        status="accepted",
+        data={"rule_type": "countdown"} if atom_type == "world_rule" else {},
     )
 
 
@@ -71,9 +70,7 @@ class _HandoffSession:
 
     def __init__(self, previous, atoms_current, atoms_evidence, scenes):
         self._previous = previous
-        self._atoms_current = atoms_current
-        self._atoms_evidence = atoms_evidence
-        self._scenes = scenes
+        self._queue = [atoms_current, atoms_evidence, scenes]
         self.statements = []
 
     async def scalar(self, statement):
@@ -82,25 +79,27 @@ class _HandoffSession:
 
     async def scalars(self, statement):
         self.statements.append(("scalars", str(statement)))
+        rows = self._queue.pop(0) if self._queue else []
+
         class _Rows:
             def __init__(self, rows):
                 self._rows = rows
+
             def all(self):
                 return self._rows
-        # 调用顺序:当前章 atoms(30) → 证据 atoms(120) → scenes(8)
-        if "source_chapter ==" in str(statement).replace("source_chapter = :source_chapter_1", "source_chapter ==") or "limit" not in str(statement):
-            pass
-        if self._atoms_current is not None:
-            rows, self._atoms_current = self._atoms_current, None
-            return _Rows(rows)
-        if self._atoms_evidence is not None:
-            rows, self._atoms_evidence = self._atoms_evidence, None
-            return _Rows(rows)
-        rows, self._scenes = self._scenes, None
+
         return _Rows(rows)
 
 
-async def _run(novel_id=PROJECT, chapter_index=3, previous_ending=""):
+def _distinguish(statement: str) -> str:
+    if "novel_scene_blocks" in statement:
+        return "scenes"
+    if "atom_type IN" in statement:
+        return "evidence"
+    return "atoms"
+
+
+async def _run(previous_ending=""):
     previous = _chapter_row()
     atoms = [
         _atom_row("character_state", "林照持有第九次潮汐记录副本"),
@@ -109,8 +108,11 @@ async def _run(novel_id=PROJECT, chapter_index=3, previous_ending=""):
     ]
     session = _HandoffSession(previous, atoms, list(atoms), [_scene_row()])
     handoff = await build_chapter_handoff(
-        session, novel_id, chapter_index, previous_ending=previous_ending
+        session, PROJECT, 3, previous_ending=previous_ending
     )
+    assert session.statements[0][0] == "scalar"
+    order = [_distinguish(s) for kind, s in session.statements[1:]]
+    assert order == ["evidence", "scenes"] or order == ["atoms", "evidence", "scenes"], order
     return handoff.to_dict()
 
 
@@ -130,6 +132,6 @@ def test_chapter_handoff_output_matches_characterization_snapshot():
     assert FIXTURE.exists(), "缺少特征基线文件,请以 HANDOFF_SNAPSHOT_UPDATE=1 生成"
     frozen = json.loads(FIXTURE.read_text(encoding="utf-8"))
     assert current == json.dumps(frozen, ensure_ascii=False, sort_keys=True, indent=2), (
-        "build_chapter_handoff 输出漂移:拆分重构必须保持字节级一致;"
+        "build_chapter_handoff 输出漂移:重构必须保持字节级一致;"
         "若为有意变更,先更新 fixtures 并在提交说明中给出理由"
     )
