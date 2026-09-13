@@ -369,6 +369,69 @@ class MemoryManager:
         )
 
     @staticmethod
+    @staticmethod
+    async def _get_branch_context(
+        db: AsyncSession,
+        project_id: uuid.UUID,
+        chapter_index: int,
+        query_text: str,
+        agent_type: str,
+        *,
+        branch_id: uuid.UUID,
+        storyline_id: str,
+        previous_ending_override: str | None,
+    ) -> dict:
+        """支线域缩减上下文:仅支线域召回,其余键供 PipelineContext 同形消费。
+
+        键集与主线 get_context 完全一致(from_memory 同形消费);
+        主线锚点记忆由支线 job 层的 anchor_context 静态文本承担。
+        """
+        recall = await recall_novel_memory(
+            db,
+            project_id=project_id,
+            chapter_index=chapter_index,
+            agent_type=agent_type,
+            branch_id=branch_id,
+            storyline_id=storyline_id,
+            query_text=query_text,
+        )
+        if recall.injected_atoms:
+            from services.novel_memory_lifecycle import record_recall_hits
+
+            await record_recall_hits(db, chapter_index, recall.injected_atoms)
+        return {
+            "agent_type": agent_type,
+            "previous_ending": previous_ending_override or "",
+            "chapter_handoff": {},
+            "chapter_handoff_context": "",
+            "short_term_context": "",
+            "full_manuscript_context": "",
+            "world_state": "",
+            "character_state": "",
+            "foreshadowing": "",
+            "plot_threads": "",
+            "vector_context": "",
+            "novel_memory_context": recall.context,
+            "narrative_index_context": "",
+            "genre": "",
+            "style": "",
+            "raw_world_state": "",
+            "raw_character_state": "",
+            "raw_foreshadowing": "",
+            "raw_plot_threads": "",
+            "character_manifest_context": "",
+            "character_card_context": "",
+            "novel_format": "",
+            "context_sources": {},
+            "knowledge": {
+                "world_state": [],
+                "character_state": [],
+                "foreshadowing": [],
+                "plot_threads": [],
+            },
+            "total_chapters": 0,
+        }
+
     async def get_context(
         db: AsyncSession,
         project_id: uuid.UUID,
@@ -376,7 +439,24 @@ class MemoryManager:
         query_text: str,
         outline_data: dict | None = None,
         agent_type: str = "writer",
+        *,
+        branch_id: uuid.UUID | None = None,
+        storyline_id: str = "main",
+        previous_ending_override: str | None = None,
     ) -> dict:
+        if branch_id is not None:
+            # 支线域缩减路径(森林 B 方向一):记忆召回走支线域;
+            # 主线锚点记忆由 job 层的 anchor_context 静态承担,不在此重建。
+            return await MemoryManager._get_branch_context(
+                db,
+                project_id,
+                chapter_index,
+                query_text,
+                agent_type,
+                branch_id=branch_id,
+                storyline_id=storyline_id,
+                previous_ending_override=previous_ending_override,
+            )
         chapter_context = await MemoryManager._load_chapter_context(
             db, project_id, chapter_index, agent_type
         )
