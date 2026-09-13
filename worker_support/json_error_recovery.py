@@ -22,6 +22,7 @@ from worker_support.events import GenerationEvents
 from services.knowledge_merger import run_post_processing
 from core.pipeline_vocab import ChapterStatus
 import logging
+from core.chapter_domain import ChapterDomain
 logger = logging.getLogger(__name__)
 
 
@@ -39,12 +40,14 @@ async def handle_json_parsing_error(
     retry_count: int,
     error: LLMJSONParsingError,
     events: GenerationEvents,
+    domain: ChapterDomain | None = None,
 ) -> JSONErrorRecoveryOutcome:
     chapter = await get_or_create_chapter(
         db,
         novel.id,
         chapter_index,
         title=f"第{chapter_index}章",
+        domain=domain,
     )
 
     append_job_error(

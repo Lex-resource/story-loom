@@ -173,6 +173,7 @@ async def run_outline(state: ChapterRunState, node: Any = None) -> str:
         planner_previous_ending=state.planner_previous_ending,
         project_id=state.project_id,
         events=state.events,
+        domain=state.domain,
     )
 
     if not state.outline or not state.outline.get("summary"):
@@ -284,7 +285,7 @@ async def run_draft(state: ChapterRunState, node: Any = None) -> str:
     # 新初稿让上一版的润色稿失效。
     state.edited_content = None
     state.chapter = await save_writer_draft(
-        state.db, state.novel, state.chapter_index, state.draft_content
+        state.db, state.novel, state.chapter_index, state.draft_content, domain=state.domain
     )
     return VERDICT_OK
 
@@ -349,6 +350,7 @@ async def run_review(state: ChapterRunState, node: Any = None) -> str:
         state.validation_errors,
         state.rewrite_count,
         on_chunk=state.editor_cb,
+        domain=state.domain,
     )
     state.chapter = review.chapter
     state.editor_result = review.editor_result
@@ -481,6 +483,7 @@ async def run_post_edit(state: ChapterRunState, node: Any = None) -> str:
         on_editor_chunk=state.editor_cb,
         editor_node=editor,
         a5_polisher_used=state.a5_polisher_used,
+        domain=state.domain,
     )
     state.latest_validator_result = outcome.validator_result
     state.draft_content = outcome.draft_content

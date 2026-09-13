@@ -15,6 +15,7 @@ from worker_support.events import GenerationEvents
 from worker_support.generation_context import append_user_intervention
 from services.continuity_contract import sanitize_outline_for_contract
 import logging
+from core.chapter_domain import ChapterDomain
 logger = logging.getLogger(__name__)
 
 def normalize_outline_data(outline: dict) -> dict:
@@ -94,10 +95,11 @@ async def prepare_chapter_outline(
     planner_previous_ending: str,
     project_id: str,
     events: GenerationEvents,
+    domain: ChapterDomain | None = None,
 ) -> dict:
     outline_data = None
     if use_existing_outline:
-        outline_data = await load_existing_outline(db, novel.id, chapter_index)
+        outline_data = await load_existing_outline(db, novel.id, chapter_index, domain=domain)
         if outline_data:
             outline_data = normalize_outline_data(outline_data)
             outline_data, contract = sanitize_outline_for_contract(
@@ -139,10 +141,10 @@ async def prepare_chapter_outline(
         outline_data["continuity_contract"] = contract
         await planner_node.agent.record_usage(db, novel.id, chapter_index, AGENT_PLANNER)
 
-        await save_planner_outline(db, novel.id, chapter_index, outline_data)
+        await save_planner_outline(db, novel.id, chapter_index, outline_data, domain=domain)
         await db.commit()
 
-    await sync_chapter_outline(db, novel.id, chapter_index, outline_data)
+    await sync_chapter_outline(db, novel.id, chapter_index, outline_data, domain=domain)
     await db.commit()
 
     return outline_data

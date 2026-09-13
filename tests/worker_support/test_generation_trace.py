@@ -50,31 +50,41 @@ def _patch(monkeypatch, name, value):
 class _Trace(list):
     """按顺序记录阶段调用；``add`` 返回值方便在 lambda 里用。"""
 
-    def __init__(self, *args):
+
+    def __init__(self, *args, **_kwargs):
         super().__init__(*args)
         # 有些行为不体现在调用顺序上 —— 例如 ``has_extractor`` 是作为参数传给
         # ``run_chapter_post_processing`` 的，序列里看不出来。这类断言记在 captured 里，
         # 不塞进序列：序列本身是黄金基线，不该为了新增断言而改动既有条目。
         self.captured: dict[str, object] = {}
 
-    def add(self, label: str):
+
+
+    def add(self, label: str, **_kwargs):
         self.append(label)
         return label
+
 
 
 class _FakeSession:
     """只需要 commit —— 所有真正碰库的函数都被 stub 了。"""
 
-    def __init__(self, trace: _Trace):
+
+    def __init__(self, trace: _Trace, **_kwargs):
         self._trace = trace
 
-    async def commit(self):
+
+
+    async def commit(self, **_kwargs):
         return None
 
 
+
 class _FakeEvents:
-    def __init__(self, trace: _Trace):
+
+    def __init__(self, trace: _Trace, **_kwargs):
         self._trace = trace
+
 
     async def status(self, agent, chapter, message, **kw):
         self._trace.add(f"event.status:{agent}")
@@ -82,8 +92,10 @@ class _FakeEvents:
     async def chunk(self, agent, chapter, text, **kw):
         return None
 
-    async def error(self, message):
+
+    async def error(self, message, **_kwargs):
         self._trace.add("event.error")
+
 
 
 def _runtime(**overrides):
@@ -147,16 +159,20 @@ def _install(
         list(final_validator_result) if isinstance(final_validator_result, list) else None
     )
 
-    async def _check_paused(db, job_id):
+
+    async def _check_paused(db, job_id, **_kwargs):
         return None
+
 
     # check_paused 是函数内 lazy import，必须 patch 到源模块上。
     import worker_support.orchestrator as orch
     monkeypatch.setattr(orch, "check_paused", _check_paused, raising=False)
 
-    async def load_runtime(db, novel_format):
+
+    async def load_runtime(db, novel_format, **_kwargs):
         trace.add(f"runtime.load:{novel_format}")
         return runtime
+
 
     _patch(monkeypatch, "load_generation_pipeline_runtime", load_runtime)
 
@@ -179,7 +195,8 @@ def _install(
     # 行为。记录了非生产行为的基线比没有基线更糟。
     real_resolve = runner.resolve_generation_start_state
 
-    def resolve_start(job, ch, params, *, has_editor):
+
+    def resolve_start(job, ch, params, *, has_editor, **_kwargs):
         # 只在首次进入时把锚点置为本场景的 start_step；递归再进来时不覆盖。
         if not getattr(job, "_trace_seeded", False):
             job.current_step = start_step
@@ -188,17 +205,20 @@ def _install(
         trace.add(f"start.resolve:{state.start_step}")
         return state
 
+
     _patch(monkeypatch, "resolve_generation_start_state", resolve_start)
 
-    def set_step(job, step, ch=None, allow_resume=False):
+
+    def set_step(job, step, ch=None, allow_resume=False, **_kwargs):
         job.current_step = step
         trace.add(f"step:{step}{'(resume)' if allow_resume else ''}")
+
 
     _patch(monkeypatch, "set_job_step", set_step)
     _patch(monkeypatch, "GenerationEvents", lambda pid: _FakeEvents(trace))
     _patch(monkeypatch, "should_resume_extractor", lambda step, ch: resume_extractor)
 
-    async def planner_inputs(db, novel, idx, custom_prompt):
+    async def planner_inputs(db, novel, idx, custom_prompt, **_kwargs):
         trace.add("planner.inputs")
         return SimpleNamespace(
             memory={}, custom_prompt=None, succeeding_beginning="",
@@ -225,16 +245,20 @@ def _install(
     # 它只读 chapter 的几个字段，_chapter() 已经全部提供。
     real_loop_state = runner.initial_generation_loop_state
 
-    def loop_state(ch, step, *, max_rewrites):
+
+    def loop_state(ch, step, *, max_rewrites, **_kwargs):
         state = real_loop_state(ch, step, max_rewrites=max_rewrites)
         trace.captured["loop_state"] = state
         return state
 
+
     _patch(monkeypatch, "initial_generation_loop_state", loop_state)
 
-    async def writer_ctx(db, novel, idx, outline):
+
+    async def writer_ctx(db, novel, idx, outline, **_kwargs):
         trace.add("writer.context")
         return SimpleNamespace(memory={}, pipeline=SimpleNamespace(previous_ending=""))
+
 
     _patch(monkeypatch, "load_writer_context", writer_ctx)
     _patch(monkeypatch, "rewrite_instructions_for_writer", lambda *a, **k: "instructions"
@@ -246,9 +270,11 @@ def _install(
 
     _patch(monkeypatch, "run_writer_draft", writer_draft)
 
-    async def save_draft(db, novel, idx, draft):
+
+    async def save_draft(db, novel, idx, draft, **_kwargs):
         trace.add("writer.save")
         return chapter
+
 
     _patch(monkeypatch, "save_writer_draft", save_draft)
 
@@ -327,18 +353,21 @@ def _install(
     # attempt 级递归走的是模块全局名 process_single_chapter（generate_job_runner.py:476），
     # 所以 patch 到 runner 上就能拦住。stub 记录 attempt 后**真的**再跑一遍
     # _process_single_chapter，让递归终止条件（attempt < 3）由生产代码自己决定。
-    async def retry_chapter(db, job, novel, idx, attempt, *, _experiment=None):
+
+    async def retry_chapter(db, job, novel, idx, attempt, *, _experiment=None, **_kwargs):
         trace.add(f"chapter.retry:attempt={attempt}")
         return await runner._process_single_chapter(
             db, job, novel, idx, attempt, experiment=_experiment
         )
+
 
     _patch(monkeypatch, "process_single_chapter", retry_chapter)
     _patch(monkeypatch, "StateMachine", SimpleNamespace(pause_job=lambda job, **kw: trace.add("job.pause")),
     )
 
 
-def _run(trace, chapter, novel_format="long_webnovel"):
+
+def _run(trace, chapter, novel_format="long_webnovel", **_kwargs):
     job = SimpleNamespace(id="job-1", current_step="planner", current_chapter=0, status="running")
     novel = SimpleNamespace(
         id="11111111-1111-1111-1111-111111111111",
@@ -352,6 +381,7 @@ def _run(trace, chapter, novel_format="long_webnovel"):
         runner._process_single_chapter(_FakeSession(trace), job, novel, 3, 1)
     )
     return job
+
 
 
 # ---------------------------------------------------------------------------
@@ -392,12 +422,14 @@ GOLDEN_HAPPY_PATH = [
 ]
 
 
-def test_long_form_happy_path_trace(monkeypatch):
+
+def test_long_form_happy_path_trace(monkeypatch, **_kwargs):
     trace = _Trace()
     chapter = _chapter()
     _install(monkeypatch, trace, runtime=_runtime(), chapter=chapter)
     _run(trace, chapter)
     assert list(trace) == GOLDEN_HAPPY_PATH
+
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +473,8 @@ GOLDEN_EDITOR_REWRITE = [
 ]
 
 
-def test_editor_rewrite_back_edge_trace(monkeypatch):
+
+def test_editor_rewrite_back_edge_trace(monkeypatch, **_kwargs):
     """Editor 打回时的回边是 Phase 2 最不能弄坏的拓扑。"""
     trace = _Trace()
     chapter = _chapter()
@@ -453,12 +486,14 @@ def test_editor_rewrite_back_edge_trace(monkeypatch):
     assert list(trace) == GOLDEN_EDITOR_REWRITE
 
 
+
 # ---------------------------------------------------------------------------
 # 分支:重写次数用尽 -> 强制修正
 # ---------------------------------------------------------------------------
 
 
-def test_force_correction_after_max_rewrites_trace(monkeypatch):
+
+def test_force_correction_after_max_rewrites_trace(monkeypatch, **_kwargs):
     """连续 rewrite 到上限后必须走强制修正，而不是继续回边。"""
     trace = _Trace()
     chapter = _chapter()
@@ -474,12 +509,14 @@ def test_force_correction_after_max_rewrites_trace(monkeypatch):
     assert trace.index("editor.force_revise") < trace.index("validator.comprehensive")
 
 
+
 # ---------------------------------------------------------------------------
 # 分支:Editor 前置校验
 # ---------------------------------------------------------------------------
 
 
-def test_validation_before_editor_trace(monkeypatch):
+
+def test_validation_before_editor_trace(monkeypatch, **_kwargs):
     trace = _Trace()
     chapter = _chapter()
     _install(
@@ -491,12 +528,14 @@ def test_validation_before_editor_trace(monkeypatch):
     assert trace.index("validator.pre_editor") < trace.index("editor.review:accept")
 
 
+
 # ---------------------------------------------------------------------------
 # 分支:没有 Editor 节点
 # ---------------------------------------------------------------------------
 
 
-def test_no_editor_skips_review_and_style_repair(monkeypatch):
+
+def test_no_editor_skips_review_and_style_repair(monkeypatch, **_kwargs):
     trace = _Trace()
     chapter = _chapter()
     _install(monkeypatch, trace, runtime=_runtime(has_editor=False), chapter=chapter)
@@ -507,12 +546,14 @@ def test_no_editor_skips_review_and_style_repair(monkeypatch):
     assert "extractor.postprocess" in trace
 
 
+
 # ---------------------------------------------------------------------------
 # 分支:风格修复触发后必须重新完整校验
 # ---------------------------------------------------------------------------
 
 
-def test_style_repair_forces_fresh_validation(monkeypatch):
+
+def test_style_repair_forces_fresh_validation(monkeypatch, **_kwargs):
     """去 AI 腔产出新内容，必须重新走 comprehensive 校验而不是复用旧结果。"""
     trace = _Trace()
     chapter = _chapter()
@@ -526,12 +567,14 @@ def test_style_repair_forces_fresh_validation(monkeypatch):
     assert trace.index("editor.style_repair:ran=True") < trace.index("validator.comprehensive")
 
 
+
 # ---------------------------------------------------------------------------
 # 分支:resume 直落 extractor
 # ---------------------------------------------------------------------------
 
 
-def test_resume_at_extractor_skips_write_and_validate(monkeypatch):
+
+def test_resume_at_extractor_skips_write_and_validate(monkeypatch, **_kwargs):
     """POSTPROCESS_FAILED 等状态恢复时，绝不能重跑 Writer 改动已验证正文。"""
     trace = _Trace()
     chapter = _chapter(status=ChapterStatus.POSTPROCESS_FAILED, draft_content="正文")
@@ -552,17 +595,20 @@ def test_resume_at_extractor_skips_write_and_validate(monkeypatch):
     assert "validator.final" not in trace
 
 
+
 # ---------------------------------------------------------------------------
 # 分支:待人工复核的章节立即暂停
 # ---------------------------------------------------------------------------
 
 
-def test_pending_review_chapter_pauses_immediately(monkeypatch):
+
+def test_pending_review_chapter_pauses_immediately(monkeypatch, **_kwargs):
     trace = _Trace()
     chapter = _chapter(status=ChapterStatus.PENDING_REVIEW, pipeline_step="extracting")
     _install(monkeypatch, trace, runtime=_runtime(), chapter=chapter)
     _run(trace, chapter)
     assert list(trace) == ["runtime.load:long_webnovel", "job.pause"]
+
 
 
 # ---------------------------------------------------------------------------
@@ -593,7 +639,8 @@ def test_empty_outline_pauses_at_planner(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_short_form_uses_same_stage_topology(monkeypatch):
+
+def test_short_form_uses_same_stage_topology(monkeypatch, **_kwargs):
     """这是 Phase 2 范围判断的依据:长短篇阶段序列相同，只有 runtime.load 的格式不同。"""
     trace = _Trace()
     chapter = _chapter()
@@ -603,13 +650,15 @@ def test_short_form_uses_same_stage_topology(monkeypatch):
     assert list(trace) == expected
 
 
+
 # ---------------------------------------------------------------------------
 # 以下场景是图引擎（Phase C）要复现的**剩余分支**。图模型的每条边都必须能在这里
 # 找到对应的一条 trace，否则那条边就是没有证据的猜测。
 # ---------------------------------------------------------------------------
 
 
-def test_no_force_correction_pauses_at_editor(monkeypatch):
+
+def test_no_force_correction_pauses_at_editor(monkeypatch, **_kwargs):
     """重写用尽 + 未启用强制修正 = 暂停等人工，而不是硬发布。
 
     对应图里 force_fix 步骤的 ``enabled_when: enable_force_correction`` 与
@@ -635,7 +684,9 @@ def test_no_force_correction_pauses_at_editor(monkeypatch):
     assert job.current_step == "editor"
 
 
-def test_editor_loop_disabled_forces_on_first_rewrite(monkeypatch):
+
+
+def test_editor_loop_disabled_forces_on_first_rewrite(monkeypatch, **_kwargs):
     """enable_editor_loop=False 时第一次 rewrite 就出圈，不走回边。
 
     对应图里 rewrite 边的 ``budgets.rewrite.disabled_when: not enable_editor_loop``
@@ -657,6 +708,7 @@ def test_editor_loop_disabled_forces_on_first_rewrite(monkeypatch):
     assert "editor.force_revise" in trace
     # 强制修正产出新内容 -> 必须重新完整校验
     assert trace.index("editor.force_revise") < trace.index("validator.comprehensive")
+
 
 
 def test_terminal_block_pauses_before_finalize(monkeypatch):
@@ -710,7 +762,8 @@ def test_failed_validation_recurses_exactly_three_attempts(monkeypatch):
     assert "extractor.postprocess" not in trace
 
 
-def test_auto_force_saved_pauses_after_finalize(monkeypatch):
+
+def test_auto_force_saved_pauses_after_finalize(monkeypatch, **_kwargs):
     """强制保存的章节要先 finalize 再暂停 —— 顺序反了会丢掉已校验的正文。"""
     trace = _Trace()
     chapter = _chapter()
@@ -727,7 +780,9 @@ def test_auto_force_saved_pauses_after_finalize(monkeypatch):
     assert job.current_step == "validator"
 
 
-def test_post_edit_continue_loops_back_without_rewriting(monkeypatch):
+
+
+def test_post_edit_continue_loops_back_without_rewriting(monkeypatch, **_kwargs):
     """编辑后校验要求再走一轮时回到循环顶部，但 decision 已是 accept -> 不重写初稿。
 
     这条边容易被想成「回到 writer 重写」。实测不是:它回到循环顶部重新加载上下文，
@@ -749,7 +804,9 @@ def test_post_edit_continue_loops_back_without_rewriting(monkeypatch):
     assert "extractor.postprocess" in trace
 
 
-def test_resume_at_editor_reuses_draft_without_rewriting(monkeypatch):
+
+
+def test_resume_at_editor_reuses_draft_without_rewriting(monkeypatch, **_kwargs):
     """从 editor 恢复:复用存量草稿，绝不重跑 Writer。
 
     机制在 initial_generation_decision —— start_step=="editor" 派生 "revise" 而不是
@@ -773,7 +830,9 @@ def test_resume_at_editor_reuses_draft_without_rewriting(monkeypatch):
     assert "extractor.postprocess" in trace
 
 
-def test_resume_at_validator_skips_write_edit_loop_entirely(monkeypatch):
+
+
+def test_resume_at_validator_skips_write_edit_loop_entirely(monkeypatch, **_kwargs):
     """从 validator 恢复:skip_write_edit=True，write-edit 循环一次都不进。
 
     实现手法是把 rewrite_count 直接顶到 max_rewrites，于是 while 条件立刻为假。
@@ -796,7 +855,9 @@ def test_resume_at_validator_skips_write_edit_loop_entirely(monkeypatch):
     assert "extractor.postprocess" in trace
 
 
-def test_extractor_disabled_still_enters_postprocess(monkeypatch):
+
+
+def test_extractor_disabled_still_enters_postprocess(monkeypatch, **_kwargs):
     """has_extractor=False 不是「跳过后处理」，而是后处理内部不跑提取。
 
     这点从序列上看不出来（它是传进 run_chapter_post_processing 的参数），但图引擎若
@@ -810,7 +871,9 @@ def test_extractor_disabled_still_enters_postprocess(monkeypatch):
     assert trace.captured["has_extractor"] is False
 
 
-def test_style_repair_disabled_keeps_editor_review(monkeypatch):
+
+
+def test_style_repair_disabled_keeps_editor_review(monkeypatch, **_kwargs):
     """去 AI 腔可以单独关掉，编辑审阅照跑。
 
     也顺带钉住:没有新内容产生时不重复完整校验（复用 post_edit 的结果）。
@@ -828,3 +891,4 @@ def test_style_repair_disabled_keeps_editor_review(monkeypatch):
     assert "validator.comprehensive" not in trace
     assert "validator.final" in trace
     assert "extractor.postprocess" in trace
+

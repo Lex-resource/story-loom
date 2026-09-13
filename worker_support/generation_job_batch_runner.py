@@ -43,6 +43,7 @@ from worker_support.generation_nodes import (
 )
 from worker_support.generate_job_runner import process_single_chapter
 from worker_support.json_error_recovery import JSONErrorRecoveryOutcome, handle_json_parsing_error
+from core.chapter_domain import mainline_domain
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,8 @@ async def process_generate_job(db: AsyncSession, job: Job) -> None:
                 retry_count,
                 exc,
                 events,
-            )
+                domain=mainline_domain(novel.id),
+)
 
             if outcome == JSONErrorRecoveryOutcome.RETRY:
                 continue

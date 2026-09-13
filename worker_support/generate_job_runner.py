@@ -150,7 +150,7 @@ async def _process_single_chapter(
     await check_paused(db, job.id)
 
     # 记忆与议题摘要是所有阶段的共同输入，与图里有没有 planner 步骤无关 —— 无条件加载。
-    planner_inputs = await prepare_planner_inputs(db, novel, next_chapter, state.custom_prompt)
+    planner_inputs = await prepare_planner_inputs(db, novel, next_chapter, state.custom_prompt, domain=domain)
     state.memory = planner_inputs.memory
     state.custom_prompt = planner_inputs.custom_prompt
     state.succeeding_beginning = planner_inputs.succeeding_beginning

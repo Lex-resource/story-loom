@@ -183,8 +183,9 @@ async def save_writer_draft(
     novel,
     chapter_index: int,
     draft_content: str,
+    domain: ChapterDomain | None = None,
 ):
-    chapter = await get_chapter_by_index(db, novel.id, chapter_index)
+    chapter = await get_chapter_by_index(db, novel.id, chapter_index, domain=domain)
     if chapter:
         chapter.draft_content = draft_content
         await db.commit()

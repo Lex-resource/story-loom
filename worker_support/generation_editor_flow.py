@@ -129,6 +129,7 @@ async def run_editor_review(
     issue_summaries: str,
     validation_errors: str,
     rewrite_count: int,
+    domain: ChapterDomain | None = None,
     on_chunk=None,
 ) -> EditorReview:
     editor_output = await editor_node.run(
@@ -156,6 +157,7 @@ async def run_editor_review(
         chapter_index,
         title=outline_data.get("title", f"第{chapter_index}章"),
         outline=outline_data,
+        domain=domain,
     )
 
     apply_editor_revision(chapter, draft_content, edited_content, decision, evaluations)
@@ -314,10 +316,11 @@ async def _commit_accepted_repair(
     chapter,
     rewrite_count: int,
     raw_issues: list,
+    domain: ChapterDomain | None = None,
 ) -> None:
     """修复稿通过复核后的收尾:标记成功、留档 issue、提交。"""
     mark_editor_success(chapter, rewrite_count)
-    await save_editor_raw_issues(db, novel.id, chapter_index, raw_issues)
+    await save_editor_raw_issues(db, novel.id, chapter_index, raw_issues, domain=domain)
     await db.commit()
 
 
@@ -371,6 +374,7 @@ async def run_post_edit_validation(
     on_editor_chunk=None,
     editor_node=None,
     a5_polisher_used: bool = False,
+    domain: ChapterDomain | None = None,
 ) -> PostEditValidationOutcome:
     final_text = edited_content or draft_content
     await events.log("校验器", "精修完成，正在对最终正文进行完整设定与逻辑审计…")
@@ -419,7 +423,7 @@ async def run_post_edit_validation(
                 repaired, validator_agent, on_validator_chunk, events,
             )
             if repaired_result.get("passed"):
-                await _commit_accepted_repair(db, novel, chapter_index, chapter, rewrite_count, raw_issues)
+                await _commit_accepted_repair(db, novel, chapter_index, chapter, rewrite_count, raw_issues, domain=domain)
                 return _accepted_outcome(repaired_result, draft_content, repaired, rewrite_count, a5_polisher_used)
             validator_result = repaired_result
             contents = apply_cleaned_content(
@@ -457,7 +461,7 @@ async def run_post_edit_validation(
                 repaired, validator_agent, on_validator_chunk, events,
             )
             if repaired_result.get("passed"):
-                await _commit_accepted_repair(db, novel, chapter_index, chapter, rewrite_count, raw_issues)
+                await _commit_accepted_repair(db, novel, chapter_index, chapter, rewrite_count, raw_issues, domain=domain)
                 return _accepted_outcome(repaired_result, draft_content, repaired, rewrite_count, a5_polisher_used)
             validator_result = repaired_result
             contents = apply_cleaned_content(
@@ -496,7 +500,7 @@ async def run_post_edit_validation(
                 passed=bool(repaired_result.get("passed")),
             )
             if repaired_result.get("passed"):
-                await _commit_accepted_repair(db, novel, chapter_index, chapter, rewrite_count, raw_issues)
+                await _commit_accepted_repair(db, novel, chapter_index, chapter, rewrite_count, raw_issues, domain=domain)
                 return _accepted_outcome(repaired_result, draft_content, repaired, rewrite_count, a5_polisher_used=True)
             a5_polisher_used = True
             validator_result = repaired_result
@@ -544,7 +548,7 @@ async def run_post_edit_validation(
         )
 
     mark_editor_success(chapter, rewrite_count)
-    await save_editor_raw_issues(db, novel.id, chapter_index, raw_issues)
+    await save_editor_raw_issues(db, novel.id, chapter_index, raw_issues, domain=domain)
     await db.commit()
     return _accepted_outcome(
         validator_result, draft_content, edited_content, rewrite_count, a5_polisher_used,

@@ -28,14 +28,26 @@ async def prepare_planner_inputs(
     novel,
     chapter_index: int,
     custom_prompt: str | None,
+    domain: ChapterDomain | None = None,
+    previous_ending_override: str | None = None,
 ) -> PlannerPreparation:
     planner_query = f"第{chapter_index}章"
-    memory = await MemoryManager.get_context(db, novel.id, chapter_index, planner_query, agent_type="planner")
+    memory = await MemoryManager.get_context(
+        db,
+        novel.id,
+        chapter_index,
+        planner_query,
+        agent_type="planner",
+        branch_id=domain.branch_id if domain else None,
+        storyline_id=domain.storyline_id if domain else "main",
+        previous_ending_override=previous_ending_override,
+    )
     succeeding_beginning = await get_succeeding_chapter_beginning(
         db,
         novel.id,
         chapter_index,
         max_chars=1500,
+        domain=domain,
     )
     previous_ending = append_succeeding_beginning_warning(
         memory["previous_ending"],
