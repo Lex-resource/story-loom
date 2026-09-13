@@ -279,3 +279,40 @@ codegraph sync && codegraph impact <symbol> && codegraph callees <symbol>
 | J1b/J2 半成品 API 面 | 产品决策项(接 UI 或废弃),维持文档化待办。用户已确认 UI 不急。 |
 
 **森林终态:10 棵树、~50 节点;除上述三项有意保留外,全部 ✅ 清偿。**
+
+---
+
+# 第二次审计(2026-09-14):图引擎迁移后的新森林
+
+> 范围:E1-E6 迁移(域参数化/穿线/支线子图/支线记忆)+ 全库复扫。
+> 方法:AST 量化 + codegraph + 新代码逐段审读 + 架构测试复核。
+
+## 复核结论(先说好消息)
+
+- models→services **0**;services→worker_support **真实导入 0**(初扫命中为文档文字,误报)
+- 架构测试 8 项全绿;域穿线完整(flow 层仓库调用均已带 domain)
+- 量化:≥100 行函数 23 个(持平);最大文件 continuity_contract 858(冻结域,维持现状)
+
+## 树 K(新):图引擎迁移的次生问题
+
+**根因**:E5 重写把"循环脚手架 + 域构建 + 图调用 + 尾部装配"整体写进了
+`process_character_branch_job`,只拆了 LLM 调用序列——**迁移本身重演了树 B 的
+"巨函数"模式**(同一根因在新区代码再生,审计价值最高的发现)。
+
+| 编号 | 节点 | 位置 | 说明 | 级别 |
+|---|---|---|---|---|
+| K1 | 支线 handler 重新巨函数化 | `worker_support/character_branch_generation_flow.py:54`(215 行 17 分支,全库第二) | 循环脚手架/域构建/state 装配/尾部四段未提取;与旧手写版同构 | P2 |
+| K2 | 冗余延迟导入 | 同文件 :125-126 | `run_chapter_graph`/`branch_default_graph` 顶部已导入,函数内重复 lazy import(E5 脚本残留) | P3 |
+| K3 | 支线状态事件无域标记 | `state.events = GenerationEvents(project 流)` | 支线 job 与主线 job 并发时,adapters 的 status 事件同名(如 "planner")且无支线标识,前端流内交错不可区分 | P3 |
+| K4 | finalize 域不感知 | `generation_validator_policy.finalize_validated_chapter:354` | 给支线章节行写主线状态值 "validated" + 未映射 pipeline_step 属性;publish 提交后、job 尾部归位前存在崩溃窗口(窗口内支线行带主线状态值;下一次续写按 current_chapter_index 重生成可自愈) | P2 |
+| K5 | 已验证干净 | — | 域分派单测 4 项;支线生命周期测试通过;domain 穿线抽查无遗漏 | 🔵 |
+
+**因果**:K1(巨函数)← E5 重写方式(迁移本身未按 C1 的阶段化模式做);
+K4 ← finalize 无域参数(与树 A2 同根:域语义缺失);K3 ← 事件词表(stream_events)未覆盖支线域。
+
+### 处置建议(优先级序)
+
+1. **K4**:finalize 加 domain 参数或支线域专用 finalize(它已在 publish 域守卫内被调用,改动局部)
+2. **K1**:按 C1 模式提取 `_prepare_branch_state` / `_finalize_branch_chapter`(特征测试可用支线生命周期测试+trace 补)
+3. **K3**:stream_events 的支线事件加 `branch_id` 字段(前端可区分)
+4. **K2**:顺手清理
