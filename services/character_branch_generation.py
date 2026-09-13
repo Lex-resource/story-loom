@@ -191,6 +191,65 @@ async def _broadcast(branch: CharacterBranch, message: str, *, status: str | Non
         logger.exception("branch_event_broadcast_failed branch_id=%s", branch.id)
 
 
+async def apply_branch_chapter_memory(
+    db: AsyncSession,
+    *,
+    novel: Novel,
+    branch: CharacterBranch,
+    chapter: CharacterBranchChapter,
+    context: PipelineContext,
+) -> list:
+    """支线域记忆提取(森林 E4):与主链同一提取器,写入支线域。
+
+    证据 + 候选原子;跳过角色卡/教义/叙事索引——权威模型不变。
+    提取失败不阻塞支线发布(advisory 哲学),返回支线域候选原子。
+    """
+    extractor_output = None
+    if settings.ENABLE_NOVEL_MEMORY_ATOMS:
+        try:
+            from agents.pipeline import ExtractorNode
+
+            extraction_context = copy.copy(context)
+            extraction_context.chapter_content = chapter.content or ""
+            extractor_node = ExtractorNode()
+            extractor_output = await extractor_node.run(
+                extraction_context, {"content": chapter.content}
+            )
+            await extractor_node.agent.record_usage(
+                db, novel.id, chapter.chapter_index, AGENT_EXTRACTOR
+            )
+        except Exception:
+            logger.exception(
+                "branch_memory_extraction_failed branch_id=%s chapter_index=%s",
+                branch.id,
+                chapter.chapter_index,
+            )
+    branch_atoms: list = []
+    if extractor_output is not None:
+        evidence = None
+        if settings.ENABLE_NOVEL_MEMORY_EVIDENCE:
+            evidence = await capture_chapter_extractor_evidence(
+                db,
+                project_id=novel.id,
+                branch_id=branch.id,
+                storyline_id=branch.storyline_id,
+                chapter_index=chapter.chapter_index,
+                chapter_content=chapter.content or "",
+                extractor_output=extractor_output,
+            )
+        if settings.ENABLE_NOVEL_MEMORY_ATOMS:
+            branch_atoms = await record_patch_atoms(
+                db,
+                project_id=novel.id,
+                chapter_index=chapter.chapter_index,
+                patch_set=KnowledgePatchSet.model_validate(extractor_output),
+                evidence_id=evidence.id if evidence is not None else None,
+                branch_id=branch.id,
+                storyline_id=branch.storyline_id,
+            )
+    return branch_atoms
+
+
 async def process_character_branch_job(
     db: AsyncSession,
     job: Job,
@@ -329,51 +388,9 @@ async def process_character_branch_job(
             chapter.error = None
             branch.current_chapter_index = next_index
             branch.status = CHARACTER_BRANCH_STATUS_DRAFT
-            # B1:支线域记忆提取(与主链同一提取器,写入支线域;
-            # 跳过角色卡/教义/叙事索引——权威模型不变)
-            extractor_output = None
-            if settings.ENABLE_NOVEL_MEMORY_ATOMS:
-                try:
-                    from agents.pipeline import ExtractorNode
-
-                    extraction_context = copy.copy(context)
-                    extraction_context.chapter_content = chapter.content or ""
-                    extractor_node = ExtractorNode()
-                    extractor_output = await extractor_node.run(
-                        extraction_context, {"content": chapter.content}
-                    )
-                    await extractor_node.agent.record_usage(
-                        db, novel.id, next_index, AGENT_EXTRACTOR
-                    )
-                except Exception:
-                    logger.exception(
-                        "branch_memory_extraction_failed branch_id=%s chapter_index=%s",
-                        branch.id,
-                        next_index,
-                    )
-            branch_atoms = []
-            if extractor_output is not None:
-                evidence = None
-                if settings.ENABLE_NOVEL_MEMORY_EVIDENCE:
-                    evidence = await capture_chapter_extractor_evidence(
-                        db,
-                        project_id=novel.id,
-                        branch_id=branch.id,
-                        storyline_id=branch.storyline_id,
-                        chapter_index=next_index,
-                        chapter_content=chapter.content or "",
-                        extractor_output=extractor_output,
-                    )
-                if settings.ENABLE_NOVEL_MEMORY_ATOMS:
-                    branch_atoms = await record_patch_atoms(
-                        db,
-                        project_id=novel.id,
-                        chapter_index=next_index,
-                        patch_set=KnowledgePatchSet.model_validate(extractor_output),
-                        evidence_id=evidence.id if evidence is not None else None,
-                        branch_id=branch.id,
-                        storyline_id=branch.storyline_id,
-                    )
+            branch_atoms = await apply_branch_chapter_memory(
+                db, novel=novel, branch=branch, chapter=chapter, context=context
+            )
             if settings.ENABLE_NOVEL_MEMORY_EVIDENCE:
                 await capture_branch_generation_evidence(
                     db,
