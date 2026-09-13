@@ -184,7 +184,11 @@ class ChapterDomain:
    + json_error_recovery)加 domain 参数并由适配器穿入 → ⑤chapter_service
    (routers 面)保持主线。
 2. **E2**:适配器与 flows 经 `state.domain` 调用(codegraph 清单逐点替换)。
-3. **E3**:MemoryManager 支线召回模式(支线域 ∪ 锚点快照,已在 B1 验证可行)。
+3. **E3(实施时证实必需)**:`generation_planner_flow.prepare_planner_inputs`
+   直接调 `MemoryManager.get_context`——E3 不能省。设计:get_context 加
+   `branch_id/storyline_id/previous_ending_override` 参数,分支路径 = 支线域召回
+   (recall_novel_memory branch 模式)+ previous_ending 来自支线上一章;
+   主线锚点快照由 job 层的 anchor_context 静态文本承担,不进 MemoryManager。
 4. **E4**:postprocess 按 domain 分派:主线 → run_post_processing(现状);
    支线 → 支线记忆写入(B1 已建:extractor+证据+原子+场景块)。
 5. **E5**:支线 job handler 重写:解析 domain → 取小说工作流图 → 构建
