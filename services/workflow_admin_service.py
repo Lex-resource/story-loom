@@ -42,6 +42,20 @@ from services.workflow_nodes import (
     validate_node_payload,
 )
 from services.service_errors import ServiceError as HTTPException
+from services.pipeline_stages import ALL_VERDICTS
+from services.chapter_graph import (
+    DEFAULT_BUDGETS,
+    PAUSE_PREFIX,
+    TARGET_DONE,
+    TARGET_RETRY,
+    VALID_ANCHORS,
+)
+from services.chapter_graph import (
+    REQUIRED_ROLES,
+    REQUIRED_VERDICT_HANDLERS,
+    ROLE_AGENT,
+)
+from services.workflow_nodes import load_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -54,15 +68,12 @@ NODE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.]{2,63}$")
 PROMPT_MODE_COPY = "copy"
 PROMPT_MODE_SHARE = "share"
 
-
 def _fail(detail: str, status: int = 400):
     raise HTTPException(status_code=status, detail=detail)
-
 
 def _fail_all(errors: list[str], prefix: str):
     if errors:
         _fail(f"{prefix}：\n" + "\n".join(f"· {e}" for e in errors))
-
 
 # ---------------------------------------------------------------------------
 # 工作流
@@ -78,14 +89,12 @@ async def _get_workflow(db: AsyncSession, name: str) -> PipelineConfigModel:
         _fail(f"工作流 '{name}' 不存在", status=404)
     return row
 
-
 async def _project_count(db: AsyncSession, name: str) -> int:
     return (
         await db.execute(
             select(func.count(Novel.id)).where(Novel.novel_format == name)
         )
     ).scalar_one() or 0
-
 
 def validate_graph_payload(raw: Any, *, catalog: dict[str, WorkflowNode]) -> list[str]:
     """校验图载荷。返回错误列表（空表示可用）。"""
@@ -112,7 +121,6 @@ def validate_graph_payload(raw: Any, *, catalog: dict[str, WorkflowNode]) -> lis
                     f"的角色是 {node.role!r} —— 角色决定跑哪段 Python，必须一致"
                 )
     return errors
-
 
 def validate_workflow_payload(
     payload: dict[str, Any],
@@ -164,12 +172,8 @@ def validate_workflow_payload(
 
     return errors
 
-
 async def list_workflow_nodes_map(db: AsyncSession) -> dict[str, WorkflowNode]:
-    from services.workflow_nodes import load_catalog
-
     return await load_catalog(db)
-
 
 async def create_workflow(db: AsyncSession, payload: dict[str, Any]) -> dict[str, Any]:
     """新建工作流，可从既有工作流克隆。
@@ -292,14 +296,12 @@ async def create_workflow(db: AsyncSession, payload: dict[str, Any]) -> dict[str
         "prompts_copied": copied,
     }
 
-
 async def _category_exists(db: AsyncSession, category: str) -> bool:
     return (
         await db.execute(
             select(PromptTemplate.id).where(PromptTemplate.category == category).limit(1)
         )
     ).scalar_one_or_none() is not None
-
 
 def dimensions_for_strategy(strategy: str) -> tuple[str, ...]:
     """该表面策略对应的质量维度。
@@ -311,7 +313,6 @@ def dimensions_for_strategy(strategy: str) -> tuple[str, ...]:
         if mapped == strategy:
             return dimensions_for(fmt)
     return dimensions_for(None)
-
 
 async def _copy_prompts(db: AsyncSession, source_category: str, target_category: str) -> int:
     rows = (
@@ -332,7 +333,6 @@ async def _copy_prompts(db: AsyncSession, source_category: str, target_category:
             )
         )
     return len(rows)
-
 
 async def delete_workflow(db: AsyncSession, name: str) -> dict[str, Any]:
     row = await _get_workflow(db, name)
@@ -368,7 +368,6 @@ async def delete_workflow(db: AsyncSession, name: str) -> dict[str, Any]:
     logger.info("workflow_deleted name=%s prompts_deleted=%d", name, own_prompts)
     return {"name": name, "prompts_deleted": own_prompts}
 
-
 # ---------------------------------------------------------------------------
 # 节点库
 # ---------------------------------------------------------------------------
@@ -376,7 +375,6 @@ async def delete_workflow(db: AsyncSession, name: str) -> dict[str, Any]:
 async def list_nodes(db: AsyncSession) -> list[dict[str, Any]]:
     catalog = await list_workflow_nodes_map(db)
     return [node.to_dict() for node in catalog.values()]
-
 
 async def create_node(db: AsyncSession, payload: dict[str, Any]) -> dict[str, Any]:
     node_id = str(payload.get("id") or "").strip()
@@ -402,7 +400,6 @@ async def create_node(db: AsyncSession, payload: dict[str, Any]) -> dict[str, An
     db.add(row)
     await db.commit()
     return node_from_model(row).to_dict()
-
 
 async def update_node(
     db: AsyncSession, node_id: str, payload: dict[str, Any]
@@ -433,7 +430,6 @@ async def update_node(
     await db.commit()
     return node_from_model(row).to_dict()
 
-
 async def delete_node(db: AsyncSession, node_id: str) -> dict[str, Any]:
     row = (
         await db.execute(select(WorkflowNodeDict).where(WorkflowNodeDict.id == node_id))
@@ -454,7 +450,6 @@ async def delete_node(db: AsyncSession, node_id: str) -> dict[str, Any]:
     await db.commit()
     return {"id": node_id}
 
-
 async def _workflows_using_node(db: AsyncSession, node_id: str) -> list[str]:
     rows = (await db.execute(select(PipelineConfigModel))).scalars().all()
     users: list[str] = []
@@ -466,19 +461,12 @@ async def _workflows_using_node(db: AsyncSession, node_id: str) -> list[str]:
             users.append(row.name)
     return users
 
-
 # ---------------------------------------------------------------------------
 # 角色词表（供前端渲染拓扑编辑器）
 # ---------------------------------------------------------------------------
 
 def list_roles() -> list[dict[str, Any]]:
     """角色词表。前端据此渲染步骤下拉与说明，不在前端重写一份。"""
-    from services.chapter_graph import (
-        REQUIRED_ROLES,
-        REQUIRED_VERDICT_HANDLERS,
-        ROLE_AGENT,
-    )
-
     roles: list[dict[str, Any]] = []
     for role in ROLE_AGENT:
         label, description = ROLE_LABELS.get(role, (role, ""))
@@ -496,7 +484,6 @@ def list_roles() -> list[dict[str, Any]]:
         )
     return roles
 
-
 def default_graph_json(
     *,
     has_editor: bool = True,
@@ -510,18 +497,8 @@ def default_graph_json(
         validation_before_editor=validation_before_editor,
     ).to_dict()
 
-
 def graph_vocabulary() -> dict[str, Any]:
     """图编辑器需要的全部词表：角色、裁决、特殊目标、预算。"""
-    from services.chapter_graph import (
-        DEFAULT_BUDGETS,
-        PAUSE_PREFIX,
-        TARGET_DONE,
-        TARGET_RETRY,
-        VALID_ANCHORS,
-    )
-    from services.pipeline_stages import ALL_VERDICTS
-
     return {
         "roles": list_roles(),
         "verdicts": sorted(ALL_VERDICTS),

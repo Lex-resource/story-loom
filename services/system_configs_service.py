@@ -19,7 +19,21 @@ from models.novel import (
     SystemNodeDict,
 )
 from services.service_errors import ServiceError as HTTPException
-
+from models.novel import WorkflowNodeDict
+from services.prompt_loader import REQUIRED_PROMPT_TEMPLATES
+from services.workflow_admin_service import (
+    list_workflow_nodes_map,
+    validate_workflow_payload,
+)
+from services import workflow_registry
+from services.pipeline_stages import StagePlan, stages_for_config
+from services.chapter_graph import graph_for_config
+from services.pipeline_stages import (
+    CANONICAL_AGENT_ORDER,
+    StagePlan,
+    normalize_stages,
+    parse_stages,
+)
 
 # ---------------------------------------------------------------------------
 # PipelineConfig CRUD
@@ -41,7 +55,6 @@ PIPELINE_CONFIG_FIELDS = (
     "prompt_category",
 )
 
-
 def _validate_pipeline_update(update_data: dict[str, Any]) -> dict[str, Any]:
     """对工作流写入做语义校验。
 
@@ -53,13 +66,6 @@ def _validate_pipeline_update(update_data: dict[str, Any]) -> dict[str, Any]:
     节点引用与身份护栏在 ``services/workflow_admin_service`` 里 —— 那些需要库里的
     节点库与工作流行，所以走 ``update_pipeline_config`` 的异步路径。
     """
-    from services.pipeline_stages import (
-        CANONICAL_AGENT_ORDER,
-        StagePlan,
-        normalize_stages,
-        parse_stages,
-    )
-
     cleaned = dict(update_data)
 
     if "max_rewrite" in cleaned:
@@ -98,11 +104,7 @@ def _validate_pipeline_update(update_data: dict[str, Any]) -> dict[str, Any]:
 
     return cleaned
 
-
 def _pipeline_config_to_dict(c: PipelineConfigModel) -> dict[str, Any]:
-    from services.chapter_graph import graph_for_config
-    from services.pipeline_stages import StagePlan, stages_for_config
-
     plan = StagePlan.from_stages(
         stages_for_config(
             getattr(c, "stages", None),
@@ -140,12 +142,10 @@ def _pipeline_config_to_dict(c: PipelineConfigModel) -> dict[str, Any]:
         "graph_is_custom": bool(stored_graph),
     }
 
-
 async def list_pipeline_configs(db: AsyncSession) -> list[dict[str, Any]]:
     result = await db.execute(select(PipelineConfigModel))
     configs = result.scalars().all()
     return [_pipeline_config_to_dict(c) for c in configs]
-
 
 async def update_pipeline_config(
     db: AsyncSession, name: str, update_data: dict[str, Any]
@@ -161,12 +161,6 @@ async def update_pipeline_config(
     cleaned = _validate_pipeline_update(update_data)
 
     # 图与身份护栏需要库里的节点库和当前行，所以放在异步路径上。
-    from services import workflow_registry
-    from services.workflow_admin_service import (
-        list_workflow_nodes_map,
-        validate_workflow_payload,
-    )
-
     errors = validate_workflow_payload(
         cleaned, catalog=await list_workflow_nodes_map(db), existing=config
     )
@@ -184,13 +178,11 @@ async def update_pipeline_config(
     # 会继续按旧策略组装提示词。
     workflow_registry.remember(config)
 
-
 # ---------------------------------------------------------------------------
 # PromptTemplate CRUD
 # ---------------------------------------------------------------------------
 
 PROMPT_FIELDS = ("system_prompt", "user_prompt_template")
-
 
 def _prompt_to_dict(p: PromptTemplate) -> dict[str, Any]:
     return {
@@ -204,7 +196,6 @@ def _prompt_to_dict(p: PromptTemplate) -> dict[str, Any]:
         "is_default": p.is_default,
     }
 
-
 async def list_prompt_templates(
     db: AsyncSession, category: Optional[str] = None
 ) -> list[dict[str, Any]]:
@@ -214,7 +205,6 @@ async def list_prompt_templates(
     result = await db.execute(stmt)
     prompts = result.scalars().all()
     return [_prompt_to_dict(p) for p in prompts]
-
 
 async def update_prompt_template(
     db: AsyncSession, prompt_id: str, update_data: dict[str, Any]
@@ -235,7 +225,6 @@ async def update_prompt_template(
     # 本进程缓存立即失效;其他进程(独立 worker)由表版本戳在下一个 agent
     # 步骤感知变更,无需重启。TTL 300s 只在版本戳查询不可用时兜底。
     invalidate_prompt_cache(prompt.name, prompt.category)
-
 
 async def create_prompt_template(
     db: AsyncSession, payload: dict[str, Any]
@@ -280,7 +269,6 @@ async def create_prompt_template(
     await db.commit()
     return _prompt_to_dict(row)
 
-
 async def delete_prompt_template(db: AsyncSession, prompt_id: str) -> dict[str, Any]:
     try:
         pid = uuid.UUID(prompt_id)
@@ -295,8 +283,6 @@ async def delete_prompt_template(db: AsyncSession, prompt_id: str) -> dict[str, 
 
     # 流水线必需的模板不能删：`load_prompt_template` 查不到会直接抛，那一章的生成
     # 当场失败。REQUIRED_PROMPT_TEMPLATES 是启动时校验用的同一张清单。
-    from services.prompt_loader import REQUIRED_PROMPT_TEMPLATES
-
     if (prompt.name, prompt.category) in set(REQUIRED_PROMPT_TEMPLATES):
         raise HTTPException(
             status_code=400,
@@ -308,8 +294,6 @@ async def delete_prompt_template(db: AsyncSession, prompt_id: str) -> dict[str, 
 
     # 被自定义节点引用的提示词同样不能删 —— 那些节点会静默回落到内置提示词，
     # 用户以为自己的润色节点在生效，实际上跑的是别的提示词。
-    from models.novel import WorkflowNodeDict
-
     referencing = (
         await db.execute(
             select(WorkflowNodeDict.id).where(WorkflowNodeDict.prompt_name == prompt.name)
@@ -329,7 +313,6 @@ async def delete_prompt_template(db: AsyncSession, prompt_id: str) -> dict[str, 
     await db.commit()
     invalidate_prompt_cache(name, category)
     return {"id": prompt_id, "name": name, "category": category}
-
 
 # ---------------------------------------------------------------------------
 # Available nodes dictionary

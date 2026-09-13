@@ -40,11 +40,14 @@ from models.novel_memory import (
     ProjectDoctrine,
 )
 from services.pipeline_types import JobStatus
+from services.vector_constants import VECTOR_COLLECTION_PREFIX
+from services.vector_chroma import delete_collection
+from services.living_docs_files import get_project_dir
+from services.character_branch_vector_service import branch_vector_collection_name
 
 logger = logging.getLogger(__name__)
 
 _ACTIVE_JOB_STATUSES = (JobStatus.PENDING, JobStatus.RUNNING)
-
 
 async def active_project_job_ids(db: AsyncSession, project_id: uuid.UUID) -> list[uuid.UUID]:
     result = await db.execute(
@@ -54,7 +57,6 @@ async def active_project_job_ids(db: AsyncSession, project_id: uuid.UUID) -> lis
         )
     )
     return list(result.scalars().all())
-
 
 async def cancel_active_project_jobs(db: AsyncSession, project_id: uuid.UUID) -> list[uuid.UUID]:
     """Make cancellation visible to workers before project rows disappear."""
@@ -66,7 +68,6 @@ async def cancel_active_project_jobs(db: AsyncSession, project_id: uuid.UUID) ->
             .values(status=JobStatus.CANCELLED, error="项目已删除，任务已取消")
         )
     return job_ids
-
 
 async def delete_project_rows(db: AsyncSession, project_id: uuid.UUID) -> list[uuid.UUID]:
     """Delete project-owned rows in dependency order."""
@@ -149,17 +150,11 @@ async def delete_project_rows(db: AsyncSession, project_id: uuid.UUID) -> list[u
     await db.execute(delete(Novel).where(Novel.id == project_id))
     return branch_ids
 
-
 async def delete_project_projections(
     project_id: uuid.UUID,
     branch_ids: list[uuid.UUID],
 ) -> list[str]:
     """Remove rebuildable Chroma and living-doc projections."""
-    from services.character_branch_vector_service import branch_vector_collection_name
-    from services.living_docs_files import get_project_dir
-    from services.vector_chroma import delete_collection
-    from services.vector_constants import VECTOR_COLLECTION_PREFIX
-
     errors: list[str] = []
     collection_names = [f"{VECTOR_COLLECTION_PREFIX}{project_id}"]
     collection_names.extend(branch_vector_collection_name(branch_id) for branch_id in branch_ids)
@@ -179,7 +174,6 @@ async def delete_project_projections(
     for error in errors:
         logger.warning("project_projection_cleanup_failed project_id=%s detail=%s", project_id, error)
     return errors
-
 
 async def delete_project_data(db: AsyncSession, project_id: uuid.UUID) -> list[str]:
     """Delete database state and then best-effort rebuildable projections."""

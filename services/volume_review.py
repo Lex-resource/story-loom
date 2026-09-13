@@ -23,13 +23,17 @@ from __future__ import annotations
 from agents.constants import NOVEL_FORMAT_ZHIHU_SHORT
 from services.chapter_progress import is_frozen
 from services.outline_hierarchy import extract_volumes, parse_chapter_range
+from services.short_story_context import build_short_manuscript_context
+from services.novel_constants import SHORT_MANUSCRIPT_CONTEXT_MAX_CHARS
+from models.novel import Chapter
+from agents.writing.validator_agent import ValidatorAgent
+from sqlalchemy import select
+from services.workflow_surface import is_short_form_workflow
 
 VOLUME_REVIEW_FLAG_TYPE = "volume_read_through_review"
 
-
 class FrozenChapterWriteError(RuntimeError):
     """Raised when a revision pass would mutate a published (frozen) chapter."""
-
 
 def select_volume(outline: dict | None, volume_index: int) -> dict | None:
     """Return the volume at ``volume_index`` (0-based), or None if out of range."""
@@ -37,7 +41,6 @@ def select_volume(outline: dict | None, volume_index: int) -> dict | None:
     if volume_index < 0 or volume_index >= len(volumes):
         return None
     return volumes[volume_index]
-
 
 def volume_index_ending_at(outline: dict | None, chapter_index: int) -> int | None:
     """Return the 0-based index of the volume whose range *ends* at
@@ -50,7 +53,6 @@ def volume_index_ending_at(outline: dict | None, chapter_index: int) -> int | No
             return i
     return None
 
-
 def chapters_in_span(chapters: list, span: tuple[int, int] | None) -> list:
     """Chapters whose index falls within an inclusive (start, end) span."""
     if not span:
@@ -58,14 +60,11 @@ def chapters_in_span(chapters: list, span: tuple[int, int] | None) -> list:
     start, end = span
     return [c for c in chapters if start <= c.chapter_index <= end]
 
-
 def frozen_chapters(chapters: list) -> list:
     return [c for c in chapters if is_frozen(c)]
 
-
 def editable_chapters(chapters: list) -> list:
     return [c for c in chapters if not is_frozen(c)]
-
 
 def assert_no_frozen_writes(targets: list) -> None:
     """The red line. Raise if any write target is a published/frozen chapter."""
@@ -76,16 +75,12 @@ def assert_no_frozen_writes(targets: list) -> None:
             f"卷级通读修订试图改动已发布章节（第 {indices} 章）；已发布章节为终态，绝不可回改。"
         )
 
-
 def should_review_volume(novel, editable: list) -> bool:
     """只有走长篇表面的工作流做卷级通读，且只在有未发布内容可改时做。
 
     按表面策略而不是格式名判断：克隆自长篇的自定义工作流有卷纲，同样需要卷级通读。
     """
-    from services.workflow_surface import is_short_form_workflow
-
     return bool(not is_short_form_workflow(novel.novel_format) and editable)
-
 
 def append_volume_review_flag(chapter, report: dict) -> None:
     flags = chapter.review_flags if isinstance(chapter.review_flags, list) else []
@@ -99,20 +94,12 @@ def append_volume_review_flag(chapter, report: dict) -> None:
         "report": report,
     }]
 
-
 async def review_volume(db, novel, volume_index: int) -> dict | None:
     """Read-through the given volume and attach a review flag to its last
     unpublished chapter. Never mutates a published chapter (raises if asked to).
 
     Returns the report dict, or None when there is nothing to review.
     """
-    from sqlalchemy import select
-
-    from agents.writing.validator_agent import ValidatorAgent
-    from models.novel import Chapter
-    from services.novel_constants import SHORT_MANUSCRIPT_CONTEXT_MAX_CHARS
-    from services.short_story_context import build_short_manuscript_context
-
     outline = novel.outline or {}
     volume = select_volume(outline, volume_index)
     span = parse_chapter_range(volume) if volume else None

@@ -31,11 +31,10 @@ from services.short_story_context import (
     short_block_prefix,
 )
 
-
 import logging
+from services.version_surface import NO_OVERRIDE, research_override
 
 logger = logging.getLogger(__name__)
-
 
 def _build_memory_recall_query(query_text: str, outline_data: dict | None) -> str:
     """Build a bounded lexical/vector query from the current agent request."""
@@ -58,23 +57,18 @@ def _build_memory_recall_query(query_text: str, outline_data: dict | None) -> st
                 parts.append(str(value))
     return " ".join(part for part in parts if part)[:2000]
 
-
 def _hybrid_recall_suppressed() -> bool:
     """研究变体是否关闭混合召回（把向量检索作为实验变量）。
 
     生产（A28）不抑制，由 `ENABLE_NOVEL_HYBRID_RECALL` 单独决定。
     """
-    from services.version_surface import NO_OVERRIDE, research_override
-
     override = research_override("hybrid_recall_suppressed")
     return bool(override) if override is not NO_OVERRIDE else False
-
 
 # btrim 与 Python str.strip 的空白集合不完全一致，估算可能偏差几个字符；
 # 预算额外预留一段余量。极端情况下（估算偏小导致后缀没攒够 max_chars）
 # 再退回整表加载，保证输出与"一次性全量渲染"逐字节一致。
 _SHORT_SUFFIX_SLACK_CHARS = 512
-
 
 def _pick_short_suffix_start(
     blocks_meta: list[tuple[int, str | None, int]],
@@ -102,7 +96,6 @@ def _pick_short_suffix_start(
             break
     return start_index, reached_target
 
-
 def _rendered_short_blocks_len(chapters: list) -> int:
     blocks = []
     for chapter in chapters:
@@ -116,7 +109,6 @@ def _rendered_short_blocks_len(chapters: list) -> int:
     if not blocks:
         return 0
     return sum(blocks) + 2 * (len(blocks) - 1)
-
 
 async def _load_short_manuscript_suffix(
     db: AsyncSession,
@@ -174,7 +166,6 @@ async def _load_short_manuscript_suffix(
         )
         return list(all_result.scalars().all())
     return st_chapters
-
 
 class MemoryManager:
     @staticmethod

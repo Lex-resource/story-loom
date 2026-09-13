@@ -1,11 +1,14 @@
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-
 import logging
+from models.novel import Chapter
+from sqlalchemy import select
+from database import async_session
+from models.novel import TokenUsage
+from database import async_session
 
 logger = logging.getLogger(__name__)
-
 
 def agent_usage_payload(agent, project_id: Any, chapter_index: int, agent_name: str) -> Optional[dict]:
     if not (hasattr(agent, "last_input_tokens") and hasattr(agent, "last_output_tokens")):
@@ -22,14 +25,10 @@ def agent_usage_payload(agent, project_id: Any, chapter_index: int, agent_name: 
         "model_name": getattr(agent, "last_model_name", None) or getattr(agent, "model", None),
     }
 
-
 async def record_agent_usage(agent, project_id: Any, chapter_index: int, agent_name: str) -> None:
     payload = agent_usage_payload(agent, project_id, chapter_index, agent_name)
     if payload is None:
         return
-    from database import async_session
-    from models.novel import TokenUsage
-
     usage = TokenUsage(**payload)
     try:
         async with async_session() as usage_db:
@@ -37,7 +36,6 @@ async def record_agent_usage(agent, project_id: Any, chapter_index: int, agent_n
             await usage_db.commit()
     except Exception as exc:
         logger.warning(f"[TokenUsage WARN] Failed to record usage for {agent_name}: {exc}")
-
 
 def backup_model_flag(backup_model: str, failure_reason: str | None = None) -> dict:
     detail = f"主模型调用失败，已自动降级至备用模型 ({backup_model}) 生成内容，文风可能与主模型略有差异"
@@ -50,12 +48,7 @@ def backup_model_flag(backup_model: str, failure_reason: str | None = None) -> d
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-
 async def record_backup_model_flag(project_id, chapter_index: int, backup_model: str, failure_reason: str | None = None) -> None:
-    from database import async_session
-    from sqlalchemy import select
-    from models.novel import Chapter
-
     try:
         async with async_session() as db:
             result = await db.execute(

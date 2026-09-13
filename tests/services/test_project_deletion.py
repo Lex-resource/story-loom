@@ -61,10 +61,10 @@ def test_delete_project_projections_removes_project_dir_and_all_namespaces(
         deleted.append(name)
 
     monkeypatch.setattr(
-        "services.living_docs_files.get_project_dir",
+        "services.project_deletion.get_project_dir",  # 打在使用处
         lambda _project_id: project_dir,
     )
-    monkeypatch.setattr("services.vector_chroma.delete_collection", fake_delete_collection)
+    monkeypatch.setattr("services.project_deletion.delete_collection", fake_delete_collection)  # 补丁打在使用处(模块导入期绑定)
 
     errors = asyncio.run(project_deletion.delete_project_projections(project_id, [branch_id]))
 

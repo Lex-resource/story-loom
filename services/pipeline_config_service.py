@@ -10,10 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.constants import AGENT_EDITOR, AGENT_WRITER
 from models.novel import PipelineConfigModel
+from services import workflow_registry
 
 if TYPE_CHECKING:
     from services.pipeline_stages import StagePlan
-
 
 @dataclass(frozen=True)
 class NovelFormatPolicy:
@@ -92,7 +92,6 @@ class NovelFormatPolicy:
             ),
         )
 
-
 @dataclass
 class PipelineConfig:
     """流程配置"""
@@ -164,7 +163,6 @@ class PipelineConfig:
         )
         return pipeline_order_from_nodes(agents, PipelineStep)
 
-
 async def get_pipeline_config(db: AsyncSession, novel_format: str) -> PipelineConfig:
     """根据小说类型从数据库获取流程配置"""
     result = await db.execute(
@@ -181,8 +179,6 @@ async def get_pipeline_config(db: AsyncSession, novel_format: str) -> PipelineCo
     # 顺手预热工作流缓存：`workflow_surface.strategy_for()` 在提示词组装的同步热路径上
     # 被调用，拿不到 AsyncSession。这里用**已经读到的这一行**填缓存，零额外查询，而每章
     # 生成都会经过这里，于是自定义工作流的表面策略一定在被用到之前就绪。
-    from services import workflow_registry
-
     workflow_registry.remember(config_model)
 
     config = PipelineConfig.from_model(config_model)

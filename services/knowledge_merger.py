@@ -50,9 +50,10 @@ from services.narrative_index import sync_narrative_index
 from services.chapter_continuity import build_chapter_handoff
 from services.memory_manager import MemoryManager
 from core.source_refs import chapter_source_ref
+from services.character_context import build_extractor_character_context
+from services.experiment_publication import record_published_chapter_for_project
 
 logger = logging.getLogger(__name__)
-
 
 def append_extractor_review_flag(
     chapter: Chapter,
@@ -105,7 +106,6 @@ def append_extractor_review_flag(
         flag_entry["conflict_ids"] = [str(item.id) for item in conflict_records]
     chapter.review_flags = list(flags) + [flag_entry]
 
-
 async def _capture_evidence_and_atoms(
     db: AsyncSession,
     novel: Novel,
@@ -133,7 +133,6 @@ async def _capture_evidence_and_atoms(
             evidence_id=evidence.id if evidence is not None else None,
         )
     return patch_set, memory_atoms
-
 
 async def _review_and_gate(
     db: AsyncSession,
@@ -198,7 +197,6 @@ async def _review_and_gate(
         return None
     return atom_reviews, conflict_records
 
-
 async def _apply_character_domain(
     db: AsyncSession,
     novel: Novel,
@@ -222,7 +220,6 @@ async def _apply_character_domain(
         chapter_index=chapter_index,
     )
     return character_update_summary, changed_character_names
-
 
 async def _promote_and_publish(
     db: AsyncSession,
@@ -321,7 +318,6 @@ async def _promote_and_publish(
             extractor_output=extract_result,
         )
 
-
 async def apply_extractor_updates(
     db: AsyncSession,
     novel: Novel,
@@ -369,7 +365,6 @@ async def apply_extractor_updates(
         )
         raise
 
-    from services.experiment_publication import record_published_chapter_for_project
     await record_published_chapter_for_project(
         db,
         novel.id,
@@ -394,7 +389,6 @@ async def apply_extractor_updates(
         logger.exception("issue_summary_refresh_failed project_id=%s chapter_index=%s", novel.id, chapter_index)
 
     await _run_post_publication_reviews(db, novel, chapter_index)
-
 
 async def _run_post_publication_reviews(
     db: AsyncSession,
@@ -463,7 +457,6 @@ async def run_post_processing(
 
     await broadcast_extractor_phase(novel.id, "analyzing")
 
-    from services.character_context import build_extractor_character_context
     outline_data = chapter.outline if isinstance(chapter.outline, dict) else {}
     character_card_context = await build_extractor_character_context(
         db,
@@ -535,7 +528,6 @@ async def run_post_processing(
             ensure_active=ensure_active,
         )
 
-
 async def _generate_initial_cards(
     novel: Novel,
     chapter: Chapter,
@@ -555,7 +547,6 @@ async def _generate_initial_cards(
             exc,
         )
         return [], None
-
 
 def _character_updates_from_extractor(extract_result: dict) -> list[CharacterCardUpdate]:
     """Read the new structured contract and adapt old character patches."""

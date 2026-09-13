@@ -44,6 +44,11 @@ logger = logging.getLogger(__name__)
 from worker_support.vector_outbox_worker import poll_vector_outbox
 from worker_support.character_branch_job import process_character_branch_job
 from worker_support.post_processing_job import process_post_processing_job
+# 再导出面:worker.py 从这里取这三个入口(历史 API 形状保留);
+# 本模块内不直接使用,勿按未使用导入清理(森林 I5 教训)。
+from worker_support.generate_job_runner import process_single_chapter  # noqa: E402,F401
+from worker_support.generation_batch import update_novel_status_on_finished  # noqa: E402,F401
+from worker_support.orphan_cleaner import cleanup_orphaned_jobs  # noqa: E402,F401
 
 # ---------------------------------------------------------------------------
 # 向后兼容 re-exports
