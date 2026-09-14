@@ -10,8 +10,14 @@ from services.stream_manager import stream_manager
 
 
 class GenerationEvents:
-    def __init__(self, project_id: str):
+    def __init__(self, project_id: str, *, scope: dict | None = None):
+        """``scope`` 为可选的域标记字典(如支线的 branch_id/scope),
+        合并进每个事件 payload——主线不传,payload 形状不变。"""
         self.project_id = project_id
+        self.scope = dict(scope or {})
+
+    def _scoped(self, data: dict) -> dict:
+        return {**self.scope, **data} if self.scope else data
 
     async def chunk(
         self,
@@ -24,34 +30,34 @@ class GenerationEvents:
         data = {"agent": agent, "chapter_index": chapter_index, "text": text}
         if phase:
             data["phase"] = phase
-        await stream_manager.broadcast(self.project_id, "chunk", data)
+        await stream_manager.broadcast(self.project_id, "chunk", self._scoped(data))
 
     async def status(self, step: str, chapter: int, message: str) -> None:
         await stream_manager.broadcast(
             self.project_id,
             "status",
-            {"step": step, "chapter": chapter, "message": message},
+            self._scoped({"step": step, "chapter": chapter, "message": message}),
         )
 
     async def log(self, source: str, message: str) -> None:
         await stream_manager.broadcast(
             self.project_id,
             "log",
-            {"source": source, "message": message},
+            self._scoped({"source": source, "message": message}),
         )
 
     async def warning(self, chapter: int, message: str) -> None:
         await stream_manager.broadcast(
             self.project_id,
             "warning",
-            {"chapter": chapter, "message": message},
+            self._scoped({"chapter": chapter, "message": message}),
         )
 
     async def error(self, message: str) -> None:
         await stream_manager.broadcast(
             self.project_id,
             "error",
-            {"message": message},
+            self._scoped({"message": message}),
         )
 
     async def validator_messages(self, result: dict, chapter: int) -> None:

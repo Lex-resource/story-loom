@@ -1,13 +1,18 @@
-"""支线生成的图引擎执行流(森林 E5)。
+"""支线生成的图引擎执行流(森林 E5/K1)。
 
 支线 job 与主线共用同一图解释器(`run_chapter_graph`)与同一套角色适配器,
 拓扑为支线子图(`branch_default_graph`:plan→draft→review→final→publish→post)。
 域隔离:章节落 `character_branch_chapters`,记忆提取写支线域;
 主线锚点记忆由创建时冻结的 `anchor_context` 静态承担。
+
+K1 阶段化:状态构建(`_prepare_branch_state`)与章节收尾
+(`_complete_branch_chapter`)独立成阶段函数,编排主体只保留
+循环脚手架 + 图调用 + 阻塞分派。
 """
 
 from __future__ import annotations
 
+import copy
 import logging
 import uuid
 
@@ -25,6 +30,7 @@ from core.character_vocab import (
     CHARACTER_BRANCH_STATUS_READY,
 )
 from core.pipeline_vocab import JobStatus
+from models.character_branches import CharacterBranchChapter
 from models.novel import Job, Novel
 from services.character_branch_generation import (
     BranchJobAborted,
@@ -39,8 +45,10 @@ from services.character_branch_service import (
     get_character_branch,
 )
 from services.character_branch_vector_service import enqueue_branch_chapter_vector
+from services.chapter_graph import branch_default_graph
 from services.novel_memory_consolidation import consolidate_scene_summary
 from services.novel_memory_evidence import capture_branch_generation_evidence
+from services.novel_memory_recall import recall_novel_memory
 from services.novel_memory_scenes import aggregate_scene_block, fallback_scene_summary
 from worker_support.chapter_graph_runner import run_chapter_graph
 from worker_support.chapter_run_state import ChapterRunState
@@ -51,10 +59,155 @@ from worker_support.pipeline_runtime import load_generation_pipeline_runtime
 logger = logging.getLogger(__name__)
 
 
-async def process_character_branch_job(
-    db: AsyncSession,
+async def _prepare_branch_state(
+    db,
     job: Job,
+    novel: Novel,
+    branch,
+    chapter: CharacterBranchChapter,
+    previous: CharacterBranchChapter | None,
+    next_index: int,
+    runtime,
+) -> ChapterRunState:
+    """阶段 1:支线上下文(锚点快照 + 前章)→ 支线域召回 → 域/运行时/planner
+    输入 → 图运行状态。"""
+    context = _branch_context(branch, chapter, novel, previous)
+    context.chapter_content = chapter.content or ""
+    if settings.ENABLE_NOVEL_MEMORY_RECALL:
+        # A2:支线自身累积记忆的召回(锚点前的主线记忆已冻结在
+        # anchor_context);续写章节据此看到前几章支线事实。
+        recall = await recall_novel_memory(
+            db,
+            project_id=novel.id,
+            chapter_index=next_index,
+            agent_type="writer",
+            branch_id=branch.id,
+            storyline_id=branch.storyline_id,
+            query_text=str(chapter.title or ""),
+        )
+        context.novel_memory_context = recall.context
+
+    domain = ChapterDomain(
+        project_id=novel.id,
+        branch_id=branch.id,
+        storyline_id=branch.storyline_id,
+        anchor_main_chapter=branch.anchor_main_chapter,
+    )
+    planner_inputs = await prepare_planner_inputs(
+        db,
+        novel,
+        next_index,
+        None,
+        domain=domain,
+        previous_ending_override=context.previous_ending,
+    )
+    from worker_support.generate_job_runner import _bind_stream_callbacks
+
+    state = ChapterRunState(
+        db=db,
+        job=job,
+        novel=novel,
+        chapter_index=next_index,
+        attempt=0,
+        runtime=runtime,
+        events=GenerationEvents(
+            str(novel.id),
+            scope={"branch_id": str(branch.id), "scope": "branch"},
+        ),
+        project_id=str(novel.id),
+        start_step="planner",
+        chapter=chapter,
+        domain=domain,
+        pipeline_context=context,
+        memory=planner_inputs.memory,
+        skeleton=context.global_outline,
+        issue_summaries=planner_inputs.issue_summaries,
+        planner_previous_ending=planner_inputs.previous_ending,
+        succeeding_beginning=planner_inputs.succeeding_beginning,
+        use_existing_outline=False,
+        custom_prompt=None,
+    )
+    _bind_stream_callbacks(state)
+    return state
+
+
+async def _complete_branch_chapter(
+    db,
+    job: Job,
+    novel: Novel,
+    branch,
+    state: ChapterRunState,
+    next_index: int,
 ) -> None:
+    """阶段 2(尾部):状态归位/指针推进/生成证据/场景块/向量投影。
+
+    除 db 事务外全部 best-effort:场景块/向量失败不阻塞支线发布。
+    """
+    chapter = state.chapter
+    outline = chapter.outline if isinstance(chapter.outline, dict) else {}
+    chapter.state_data = {
+        "last_observed_chapter": next_index,
+        "end_state": outline.get("end_state", ""),
+        "character_goals": copy.deepcopy(outline.get("character_goals", [])),
+        "source": branch.storyline_id,
+    }
+    chapter.relationship_changes = copy.deepcopy(outline.get("relationship_changes", []))
+    chapter.status = CHARACTER_BRANCH_CHAPTER_STATUS_READY
+    chapter.error = None
+    branch.current_chapter_index = next_index
+    branch.status = CHARACTER_BRANCH_STATUS_DRAFT
+    branch_atoms = (state.domain_artifacts or {}).get("branch_atoms", [])
+    if settings.ENABLE_NOVEL_MEMORY_EVIDENCE:
+        await capture_branch_generation_evidence(
+            db,
+            project_id=novel.id,
+            branch_id=branch.id,
+            storyline_id=branch.storyline_id,
+            chapter_index=next_index,
+            chapter_content=chapter.content or "",
+            generation_data={
+                "title": chapter.title,
+                "outline": outline,
+                "state_data": chapter.state_data,
+                "relationship_changes": chapter.relationship_changes,
+            },
+        )
+    if settings.ENABLE_NOVEL_MEMORY_SCENE_BLOCKS:
+        try:
+            async with db.begin_nested():
+                branch_summary = fallback_scene_summary(chapter.outline, chapter.content)
+                if settings.ENABLE_SCENE_BLOCK_CONSOLIDATION:
+                    branch_summary = (
+                        await consolidate_scene_summary(
+                            db, novel, chapter, branch_summary, accepted_atoms=branch_atoms,
+                        )
+                        or branch_summary
+                    )
+                await aggregate_scene_block(
+                    db,
+                    project_id=novel.id,
+                    branch_id=branch.id,
+                    storyline_id=branch.storyline_id,
+                    scope_type="character_arc",
+                    scope_key=branch.storyline_id,
+                    summary=branch_summary,
+                    current_state=chapter.state_data or {},
+                    open_questions=outline.get("open_questions", []),
+                    recent_changes=list(outline.get("relationship_changes", [])),
+                    source_ref=f"character_branch:{branch.id}:chapter:{next_index}:scene",
+                    source_chapter=next_index,
+                    valid_from_chapter=next_index,
+                )
+        except Exception:
+            logger.exception(
+                "branch_scene_block_aggregation_failed branch_id=%s chapter_index=%s",
+                branch.id,
+                next_index,
+            )
+    await enqueue_branch_chapter_vector(db, branch, chapter)
+
+
+async def process_character_branch_job(db, job: Job) -> None:
     params = job.params or {}
     branch_id = uuid.UUID(str(params["branch_id"]))
     character_id = uuid.UUID(str(params["character_id"]))
@@ -62,6 +215,10 @@ async def process_character_branch_job(
     novel = (await db.execute(select(Novel).where(Novel.id == job.project_id))).scalar_one_or_none()
     if novel is None:
         raise LookupError("Branch or project not found")
+
+    # runtime/图与章节无关,循环外加载一次
+    runtime = await load_generation_pipeline_runtime(db, novel.novel_format)
+    graph = branch_default_graph(max_rewrites=runtime.max_rewrites)
 
     try:
         branch = await _branch_checkpoint(
@@ -88,65 +245,12 @@ async def process_character_branch_job(
             branch = await _branch_checkpoint(
                 db, job, branch_id, character_id, lock=False
             )
-            context = _branch_context(branch, chapter, novel, previous)
-            context.chapter_content = chapter.content or ""
-            if settings.ENABLE_NOVEL_MEMORY_RECALL:
-                # A2:支线自身累积记忆的召回(锚点前的主线记忆已冻结在
-                # anchor_context);后续续写章节据此看到前几章支线事实。
-                recall = await recall_novel_memory(
-                    db,
-                    project_id=novel.id,
-                    chapter_index=next_index,
-                    agent_type="writer",
-                    branch_id=branch.id,
-                    storyline_id=branch.storyline_id,
-                    query_text=str(chapter.title or ""),
-                )
-                context.novel_memory_context = recall.context
+
             await _broadcast(branch, f"正在生成支线第{next_index}章")
-
-            # E5:支线 job 走与主线同一图引擎(数据库工作流拓扑的支线子图)。
-            domain = ChapterDomain(
-                project_id=novel.id,
-                branch_id=branch.id,
-                storyline_id=branch.storyline_id,
-                anchor_main_chapter=branch.anchor_main_chapter,
+            state = await _prepare_branch_state(
+                db, job, novel, branch, chapter, previous, next_index, runtime
             )
-            runtime = await load_generation_pipeline_runtime(db, novel.novel_format)
-            planner_inputs = await prepare_planner_inputs(
-                db,
-                novel,
-                next_index,
-                None,
-                domain=domain,
-                previous_ending_override=context.previous_ending,
-            )
-            state = ChapterRunState(
-                db=db,
-                job=job,
-                novel=novel,
-                chapter_index=next_index,
-                attempt=0,
-                runtime=runtime,
-                events=GenerationEvents(str(novel.id)),
-                project_id=str(novel.id),
-                start_step="planner",
-                chapter=chapter,
-                domain=domain,
-                pipeline_context=context,
-                memory=planner_inputs.memory,
-                skeleton=context.global_outline,
-                issue_summaries=planner_inputs.issue_summaries,
-                planner_previous_ending=planner_inputs.previous_ending,
-                succeeding_beginning=planner_inputs.succeeding_beginning,
-                use_existing_outline=False,
-                custom_prompt=None,
-            )
-            _bind_stream_callbacks(state)
-
-            outcome = await run_chapter_graph(
-                state, branch_default_graph(max_rewrites=runtime.max_rewrites)
-            )
+            outcome = await run_chapter_graph(state, graph)
 
             if outcome.decision == "blocked":
                 chapter.status = CHARACTER_BRANCH_CHAPTER_STATUS_FAILED
@@ -158,67 +262,7 @@ async def process_character_branch_job(
                 await _broadcast(branch, chapter.error, status=branch.status)
                 return
 
-            chapter = state.chapter
-            chapter.state_data = {
-                "last_observed_chapter": next_index,
-                "end_state": outline.get("end_state", ""),
-                "character_goals": copy.deepcopy(outline.get("character_goals", [])),
-                "source": branch.storyline_id,
-            }
-            chapter.relationship_changes = copy.deepcopy(outline.get("relationship_changes", []))
-            chapter.status = CHARACTER_BRANCH_CHAPTER_STATUS_READY
-            chapter.error = None
-            branch.current_chapter_index = next_index
-            branch.status = CHARACTER_BRANCH_STATUS_DRAFT
-            branch_atoms = (state.domain_artifacts or {}).get("branch_atoms", [])
-            if settings.ENABLE_NOVEL_MEMORY_EVIDENCE:
-                await capture_branch_generation_evidence(
-                    db,
-                    project_id=novel.id,
-                    branch_id=branch.id,
-                    storyline_id=branch.storyline_id,
-                    chapter_index=next_index,
-                    chapter_content=chapter.content or "",
-                    generation_data={
-                        "title": chapter.title,
-                        "outline": outline,
-                        "state_data": chapter.state_data,
-                        "relationship_changes": chapter.relationship_changes,
-                    },
-                )
-            if settings.ENABLE_NOVEL_MEMORY_SCENE_BLOCKS:
-                try:
-                    async with db.begin_nested():
-                        branch_summary = fallback_scene_summary(chapter.outline, chapter.content)
-                        if settings.ENABLE_SCENE_BLOCK_CONSOLIDATION:
-                            branch_summary = (
-                                await consolidate_scene_summary(
-                                    db, novel, chapter, branch_summary, accepted_atoms=branch_atoms,
-                                )
-                                or branch_summary
-                            )
-                        await aggregate_scene_block(
-                            db,
-                            project_id=novel.id,
-                            branch_id=branch.id,
-                            storyline_id=branch.storyline_id,
-                            scope_type="character_arc",
-                            scope_key=branch.storyline_id,
-                            summary=branch_summary,
-                            current_state=chapter.state_data or {},
-                            open_questions=(chapter.outline or {}).get("open_questions", []),
-                            recent_changes=(chapter.relationship_changes or []),
-                            source_ref=f"character_branch:{branch.id}:chapter:{next_index}:scene",
-                            source_chapter=next_index,
-                            valid_from_chapter=next_index,
-                        )
-                except Exception:
-                    logger.exception(
-                        "branch_scene_block_aggregation_failed branch_id=%s chapter_index=%s",
-                        branch.id,
-                        next_index,
-                    )
-            await enqueue_branch_chapter_vector(db, branch, chapter)
+            await _complete_branch_chapter(db, job, novel, branch, state, next_index)
             await db.commit()
             await _broadcast(branch, f"支线第{next_index}章已完成", status=branch.status)
             branch = await _branch_checkpoint(
@@ -251,7 +295,7 @@ async def process_character_branch_job(
             return
         branch = await get_character_branch(db, job.project_id, character_id, branch_id, lock=True)
         if branch is not None:
-            if branch.status == CHARACTER_BRANCH_STATUS_ARCHIVED:
+            if branch.status == "archived":
                 if latest_job is not None:
                     latest_job.status = JobStatus.CANCELLED
                     await db.commit()

@@ -323,3 +323,11 @@ K4 ← finalize 无域参数(与树 A2 同根:域语义缺失);K3 ← 事件词�
 - **K4 ✅** run_publish 域守卫:支线域只收敛内容/字数,主线状态值与步骤属性不再写入支线行
 - **K1 ⬜** handler 215 行的阶段化提取(下一轮,特征网:支线生命周期测试+全量)
 - **K3 ⬜** 支线状态事件的域标记(需前端约定配合,单独排期)
+
+### 树 K 处置完成(2026-09-14)
+
+- **K1 ✅** handler 阶段化:`_prepare_branch_state`(上下文/召回/域/状态)+ `_complete_branch_chapter`(尾部装配);编排主体剩循环脚手架 + 图调用 + 阻塞分派
+- **K2 ✅**(前轮)
+- **K3 ✅** GenerationEvents 加 scope 参数(支线 job 事件带 branch_id/scope,主线 payload 形状不变)
+- **K4 ✅**(前轮)
+- **配套安全网 ✅** test_character_branch_generation_flow:happy path(域/召回/子图角色/尾部状态/事件标记)+ blocked 路径——E5 重写期引入的两个真 bug(尾部未定义 outline、缺失 recall 导入)即由此类测试暴露

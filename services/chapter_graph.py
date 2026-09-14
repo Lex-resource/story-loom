@@ -303,7 +303,11 @@ def branch_default_graph(*, max_rewrites: int = 2) -> ChapterGraph:
             next=Edge(TARGET_DONE),
         ),
     }
-    return ChapterGraph(steps=steps)
+    return ChapterGraph(
+        entry="plan",
+        steps=steps,
+        budgets=dict(DEFAULT_BUDGETS),
+    )
 
 
 
