@@ -6,10 +6,7 @@ import json
 
 POSTGRESQL_ASYNC_PREFIX = "postgresql+asyncpg://"
 
-# A28/V43 is the strongest completed Ariadne-continuity profile: it keeps the
-# authority boundary, permits one explicitly bounded hypothesis for reversible
-# investigation, and requires one observable narrative delta per chapter.
-# Research jobs can still override this explicitly.
+# Long-form production keeps a fixed V43 continuity surface.
 DEFAULT_CONTINUITY_PROMPT_VERSION = "V43"
 
 
@@ -99,7 +96,6 @@ class Settings(BaseSettings):
     DATA_DIR: str = str(Path(__file__).parent / "data")
     SETTINGS_FILE: str = str(Path(__file__).parent / "data" / "settings.json")
     TOKENIZER_DIR: str = str(Path(__file__).parent / "data" / "tokenizer")
-    PROMPTS_DIR: str = str(Path(__file__).parent / "prompts")
     LOG_DIR: str = str(Path(__file__).parent / "logs")
     FRONTEND_DIR: str = str(Path(__file__).parent / "frontend" / "dist")
 
@@ -162,11 +158,8 @@ class Settings(BaseSettings):
     # issues for review, but do not spend a model call rebuilding summaries in
     # the layered memory pipeline unless explicitly re-enabled.
     ENABLE_LEGACY_ISSUE_CLASSIFIER: bool = False
-    # 研究专用。生产已冻结在 A28/V43（见 docs/research/novel-memory-continuity/PRODUCTION.md），
-    # 生产代码里不再有版本门，因此改这个值**不会**改变生产行为——它只被
-    # research/prompt_versions/ 用于复现历史实验。研究运行通过
-    # job.params.experiment.prompt_version 指定版本。
-    # main.py / worker.py 启动时会对偏离 V43 的取值发出 warning。
+    # Compatibility setting. Production prompt behavior is fixed in code and
+    # does not switch when this value changes.
     NOVEL_CONTINUITY_PROMPT_VERSION: str = DEFAULT_CONTINUITY_PROMPT_VERSION
 
 _settings = Settings()
@@ -198,7 +191,7 @@ def apply_runtime_env():
 def warn_if_prompt_version_overridden() -> str | None:
     """检查 NOVEL_CONTINUITY_PROMPT_VERSION 是否被改成了非生产冻结值。
 
-    生产代码已按 A28/V43 内联，不再读这个值，所以在 .env 里把它改成 V50 之类
+    生产代码已按 A28/V43 内联，不再读这个值，所以在 .env 里修改它
     **不会**生效。返回一条 warning 文本（无异常时返回 None），由 main/worker
     在启动时记录，避免这种静默无效。
     """
@@ -208,7 +201,7 @@ def warn_if_prompt_version_overridden() -> str | None:
     return (
         f"NOVEL_CONTINUITY_PROMPT_VERSION={configured} 不会改变生产行为："
         f"生产已冻结在 {DEFAULT_CONTINUITY_PROMPT_VERSION}，版本门已内联。"
-        "研究运行请通过 job.params.experiment.prompt_version 指定版本。"
+        "生产行为保持固定。"
     )
 
 

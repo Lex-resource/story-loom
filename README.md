@@ -155,12 +155,13 @@ novel-assistant/
 ├── worker_support/         # 后台任务编排
 ├── models/                 # SQLAlchemy ORM 模型
 ├── alembic/                # 数据库迁移
-├── prompts/                # 提示词模板（JSON）
 ├── frontend/               # React 前端
 ├── scripts/                # 运维脚本
 ├── tests/                  # 测试
 └── docs/                   # 文档
 ```
+
+长篇生产提示词约束见 [`docs/production-prompt-surface.md`](docs/production-prompt-surface.md)。
 
 ## 角色卡数据流
 
@@ -176,7 +177,7 @@ Planner 只读取人物志摘要来选择本章角色并生成 `character_goals`
 
 ## 提示词模板
 
-`prompts/` 下按 `{extraction,planning,validation,writing}/{long_webnovel,zhihu_short}.json` 组织。应用启动时会自动将模板种子到数据库 `prompt_templates` 表，数据库为运行时权威来源。可在「系统配置」页面在线编辑。
+内置提示词由 Alembic 数据迁移写入 PostgreSQL `prompt_templates` 表，数据库是唯一运行时来源。可在「系统配置」页面在线编辑、新建和删除（流水线必需模板不能删除）。长篇生产表面说明见 [`docs/production-prompt-surface.md`](docs/production-prompt-surface.md)。
 
 ## 许可证
 

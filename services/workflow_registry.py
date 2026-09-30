@@ -31,7 +31,7 @@ ALL_STRATEGIES: frozenset[str] = frozenset(
 )
 
 # 两个内置工作流的静态兜底。缓存未预热、或部署时 DB 暂时读不到时使用。
-# 生产冻结在 A28/V43 的只有长篇（见 docs/research/novel-memory-continuity/PRODUCTION.md）。
+# 长篇生产使用固定的 A28/V43 表面。
 BUILTIN_STRATEGY: dict[str, str] = {
     NOVEL_FORMAT_LONG_WEBNOVEL: STRATEGY_FROZEN_V43,
     NOVEL_FORMAT_ZHIHU_SHORT: STRATEGY_SHORT_FORM,

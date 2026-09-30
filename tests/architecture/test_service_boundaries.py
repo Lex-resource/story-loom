@@ -10,7 +10,7 @@ PRODUCTION_ROOTS = ("agents", "services", "worker_support", "routers")
 VERSION_SEAM = "services/version_surface.py"
 
 # 唯一允许按格式名硬比的生产文件。这三处的职责就是「把格式名翻译成别的东西」，
-# 不翻译反而做不成事：策略解析本身、从创作档案派生内部格式、提示词模板种子。
+# 不翻译反而做不成事：策略解析本身、从创作档案派生内部格式、提示词必需项校验。
 FORMAT_NAME_ALLOWLIST = (
     "services/workflow_registry.py",
     "services/creative_profile.py",
@@ -113,10 +113,10 @@ def test_configuration_services_are_http_independent():
 def test_production_has_no_prompt_version_gates():
     """生产代码不得依据提示词版本分支。
 
-    生产冻结在 A28/V43（见 docs/research/novel-memory-continuity/PRODUCTION.md）。
+    生产冻结在 A28/V43（见 docs/production-prompt-surface.md）。
     历史上有 292 处 `prompt_version_at_least(...)` 散布在 19 个生产文件里，其中约
     一半引用高于 V43 的版本，在生产下恒为假。它们已被按 V43 求值并内联，历史行为
-    移入 research/prompt_versions/。
+    历史版本不属于公开生产代码。
 
     新增版本相关行为时，请在 research/ 里注册一个表面，而不是在生产加门。
     """
@@ -134,7 +134,7 @@ def test_production_has_no_prompt_version_gates():
                 if node.func.id in {"prompt_version_at_least", "_prompt_version_at_least", "prompt_version"}:
                     violations.append(f"{rel}:{node.lineno}")
     assert violations == [], (
-        "生产代码出现了提示词版本门。请改为在 research/prompt_versions/ 注册表面：\n"
+        "生产代码出现了提示词版本门；公开生产代码只能使用冻结的 A28/V43：\n"
         + "\n".join(violations)
     )
 

@@ -2,13 +2,9 @@
 
 AI 小说创作助手。FastAPI + React,五智能体流水线自动生成、审阅、校验章节,并维护贯穿全文的分层记忆。
 
-## 这个仓库有两重身份
+## 生产提示词
 
-**生产应用**冻结在提示词版本 **A28/V43**,决策依据见 `docs/research/novel-memory-continuity/PRODUCTION.md`(十章实验:七维平均 8.601、9/9 章零内容重试、连续性 9.000、平均记忆上下文 ~6036 字符)。
-
-**研究平台**保存 V0–V66 与 Ariadne A0–A52 共 78 个实验版本,位于 `research/`。生产代码**不含任何版本分支**;研究变体通过唯一接缝 `services/version_surface.py` 接入。
-
-这个分离由架构测试强制(见下)。改动前先读 `tests/architecture/test_service_boundaries.py`。
+长篇生产提示词固定在 A28/V43。契约说明见 `docs/production-prompt-surface.md`；研究文档、历史版本和原始运行数据保留在本地，不进入公开仓库。
 
 ## 常用命令
 
@@ -16,7 +12,6 @@ AI 小说创作助手。FastAPI + React,五智能体流水线自动生成、审�
 # 测试(全量约 10-15s,具体数量以 pytest -q 为准)
 .venv/Scripts/python.exe -m pytest -q
 .venv/Scripts/python.exe -m pytest tests/architecture/ -q      # 边界约束
-.venv/Scripts/python.exe -m pytest tests/research/ -q          # 研究版本
 .venv/Scripts/python.exe -m pytest tests/worker_support/test_generation_trace.py -q   # 生成流程 golden trace
 
 # 后端 / worker / 前端
@@ -31,7 +26,7 @@ python scripts/migrate_db.py
 python scripts/reconcile_storage.py [--repair]
 ```
 
-环境:Windows + PowerShell,虚拟环境在 `.venv/`。`data/` 有 1.4 GB 研究产物,已被 gitignore。
+环境:Windows + PowerShell,虚拟运行数据已被 gitignore。
 
 ## 硬约束
 
@@ -40,9 +35,9 @@ python scripts/reconcile_storage.py [--repair]
 1. **`services/` 不得导入 `worker_support/`** —— AST 测试强制。这也决定了工作流图的分层:
    模型与校验器在 `services/chapter_graph.py`（router 写入时要校验),解释器在
    `worker_support/chapter_graph_runner.py`。
-2. **生产代码不得出现提示词版本门** —— 不得调用 `prompt_version_at_least`/`prompt_version`。唯一例外是接缝 `services/version_surface.py`。需要版本相关行为时,在 `research/prompt_versions/` 注册一个表面。
+2. **生产提示词表面固定在 A28/V43** —— 不得在生产代码中增加历史版本分支。
 3. **生产代码不得依据 `ExperimentContext.variant` 分支** —— 把 variant 写进事件记录是允许的(`experiment_recorder` 的本职),用它做判断不行。
-4. **`research/` 只能在接缝函数内部被导入** —— 部署时可以完全不包含该目录;`research_override` 用 `ImportError` 兜住缺失。
+4. **生产代码不能依赖本地研究目录** —— GitHub 克隆出的生产项目必须在没有 `research/`、`docs/research/` 和 `tests/research/` 时可运行。
 5. **`DATABASE_URL` 必须是 `postgresql+asyncpg://`** —— `config.py:16` 强校验,SQLite 不受支持。
 6. **不使用 `Base.metadata.create_all()`** —— 只走 Alembic 迁移。
 7. **修改提示词表面等于修改生产行为** —— 先更新黄金快照(见下)并在说明里给出理由。
@@ -54,23 +49,11 @@ python scripts/reconcile_storage.py [--repair]
    `tests/worker_support/test_chapter_steps_anchors.py` 对源码做 AST 检查。
 10. **改动单章生成流程前先跑 golden trace** —— 见下。
 
-## 提示词表面与黄金快照
+## 提示词表面
 
-`tests/fixtures/v43_production_surface.json` 逐字节锁定 A28/V43 的生产表面:5 个 agent 的完整 system/user prompt、交接包在多个预算下的渲染、契约规范化结果、Validator 的重试分类判定、上下文预算数值。
-
-有意修改提示词时:
-
-```bash
-V43_SNAPSHOT_UPDATE=1 .venv/Scripts/python.exe -m pytest tests/test_v43_production_surface_snapshot.py
-```
-
-三条不变量由该文件的测试保证:
-
-- 无 `ExperimentContext` 的生产表面 **等于** pin `V43 + ariadne-a28` 的表面
-- 在生产冻结点上,研究覆盖层对每个已注册表面**让路**(返回 `NO_OVERRIDE`),使 pin A28/V43 的复现走生产同一条代码路径
-- 偏离冻结点的版本(如 V50/V66)确实拿到覆盖 —— 证明这是"分离"而非"删除"
-
-`NOVEL_CONTINUITY_PROMPT_VERSION` 现在是**研究专用**。在 `.env` 里把它改成 V50 之类不会改变生产行为;`main.py`/`worker.py` 启动时会对偏离 V43 的取值发 warning。
+长篇生产表面和边界见 `docs/production-prompt-surface.md`。内置模板由 Alembic
+迁移写入 `prompt_templates`，数据库是运行时唯一来源。`NOVEL_CONTINUITY_PROMPT_VERSION`
+仅为兼容保留；生产固定使用 V43，在 `.env` 中修改该值不会切换生产提示词。
 
 ## 单章生成的 golden trace
 
@@ -130,7 +113,6 @@ worker_support/   任务编排:orchestrator 是 worker 循环唯一装配点
 core/                         中立词汇层:agent 名/流水线枚举/记忆与角色常量。
                               依赖图的叶子(只许 import 标准库);models 与
                               services 都从这里向下引用,禁止反向依赖 services
-research/                     78 个实验版本(生产不导入)
 ```
 
 词汇与调参的落点:`core/` 只放跨层词汇;agent 注册表在 `agents/agent_registry.py`,
@@ -173,10 +155,7 @@ Recall 失败返回空记忆,主流程继续用既有 canonical context —— �
 
 ## 提示词模板
 
-`prompts/{extraction,planning,validation,writing}/{long_webnovel,zhihu_short}.json`。启动时种子到数据库 `prompt_templates` 表,**数据库是运行时权威来源**,可在「系统配置」页在线编辑、新建、删除。
-
-磁盘 JSON 只补缺失行(`overwrite_existing=False`),不覆盖任何在线编辑。自定义工作流的
-提示词由 `pipeline_configs.prompt_category` 路由,可以复制一套也可以共享别人的那套。
+内置提示词由 Alembic 数据迁移写入 `prompt_templates` 表,**数据库是唯一运行时来源**,可在「系统配置」页在线编辑、新建、删除。自定义工作流的提示词由 `pipeline_configs.prompt_category` 路由,可以复制一套也可以共享别人的那套。
 
 提示词缓存的跨进程新鲜度由**组合版本戳**保证(`services/config_versions.py` 的
 `(COUNT(*), MAX(updated_at))`,依赖 prompt_templates.updated_at 列):任何进程改库,

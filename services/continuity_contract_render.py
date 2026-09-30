@@ -18,7 +18,7 @@ def contract_prompt(
     *,
     agent_type: str = "writer",
 ) -> str:
-    # 低于 V43 的契约行为已冻结在 research/prompt_versions/contract_legacy.py。
+    # 生产只支持冻结的 V43 契约；历史版本不随公开生产代码发布。
     _legacy = research_override("legacy_contract_prompt", contract, agent_type=agent_type)
     if _legacy is not NO_OVERRIDE:
         return _legacy
@@ -75,7 +75,7 @@ def prompt_outline_for_agent(
     agent_type: str | None = None,
 ) -> dict[str, Any]:
     """Remove persisted contracts and, for V35 Writer, audit-only fields."""
-    # 低于 V43 的契约行为已冻结在 research/prompt_versions/contract_legacy.py。
+    # 生产只支持冻结的 V43 契约；历史版本不随公开生产代码发布。
     _legacy = research_override("legacy_prompt_outline_for_agent", outline, agent_type=agent_type)
     if _legacy is not NO_OVERRIDE:
         return _legacy

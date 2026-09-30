@@ -54,6 +54,23 @@ data/pipelines.json
 data/tokenizer/
 data/research_runs/
 
+# ===== 本地研究材料（不上传公开生产仓库） =====
+docs/research/
+research/
+tests/research/
+docs/plans/*-ariadne-*.md
+docs/plans/*-v*.md
+
+# 根目录中的历史版本回归测试仅保存在本地研究环境
+tests/test_prompt_utils.py
+tests/test_provider_and_experiment.py
+tests/test_planner_prompt_contract.py
+tests/test_v43_bounded_hypothesis.py
+tests/test_v48_memory_merge.py
+tests/test_v43_production_surface_snapshot.py
+tests/fixtures/v43_production_surface.json
+tests/services/test_context_compaction.py
+
 # ===== 日志 =====
 logs/
 *.log

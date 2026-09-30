@@ -7,7 +7,7 @@
 于是:研究实验仍可覆盖任意工作流,而普通短篇生产**不需要 `research/` 存在**也能拿到
 短篇表面 —— 短篇不是研究变体,它是一等生产工作流。
 
-生产冻结在 A28/V43 的只有**长篇**(见 `docs/research/novel-memory-continuity/PRODUCTION.md`)。
+长篇生产使用固定的 A28/V43 表面(见 `docs/production-prompt-surface.md`)。
 因此 `long_webnovel` 一律返回 `NO_WORKFLOW_OVERRIDE`,让调用点执行自己内联的 A28/V43
 逻辑 —— 长篇提示词字节不变,`tests/test_v43_production_surface_snapshot.py` 的黄金快照
 不动。这是「把短篇分出去」,不是「改写长篇」。
@@ -111,6 +111,5 @@ def registered_surfaces() -> tuple[tuple[str, str], ...]:
 
 
 # 导入短篇表面实现以触发注册。放在文件末尾,避免 `short_form_surfaces` 导入
-# 本模块的 `register`/策略常量时形成循环 —— 与 `research/prompt_versions/__init__.py`
-# 末尾导入各版本模块是同一个手法。
+# 本模块的 `register`/策略常量时形成循环，因此实现模块在文件末尾导入。
 from services import short_form_surfaces as _short_form_surfaces  # noqa: E402,F401

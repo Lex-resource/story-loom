@@ -1,6 +1,6 @@
 """生产与研究覆盖层之间的唯一接缝。
 
-生产代码冻结在 A28/V43(见 `docs/research/novel-memory-continuity/PRODUCTION.md`),
+生产代码冻结在 A28/V43(见 `docs/production-prompt-surface.md`),
 因此**不含任何版本或变体字面量**。需要在研究运行里改变行为的生产函数,统一在这里
 问一次 `research_override(...)`:拿到 `NO_OVERRIDE` 就执行自己内联的 A28/V43 逻辑。
 

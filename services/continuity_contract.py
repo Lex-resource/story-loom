@@ -509,7 +509,7 @@ def _normalize_contract_inputs(
     enforce_authority: bool | None,
 ):
     """阶段 1:输入归一化 + legacy 覆盖层分派。"""
-    # 低于 V43 的契约行为已冻结在 research/prompt_versions/contract_legacy.py。
+    # 生产只支持冻结的 V43 契约；历史版本不随公开生产代码发布。
     _legacy = research_override("legacy_build_chapter_contract", outline, handoff, enforce_authority=enforce_authority)
     if _legacy is not NO_OVERRIDE:
         return _legacy
@@ -822,7 +822,7 @@ def sanitize_outline_for_contract(
     preserve the raw model response.  Downstream agents receive the sanitized
     outline and the same contract.
     """
-    # 低于 V43 的契约行为已冻结在 research/prompt_versions/contract_legacy.py。
+    # 生产只支持冻结的 V43 契约；历史版本不随公开生产代码发布。
     _legacy = research_override("legacy_sanitize_outline_for_contract", outline, handoff, enforce_authority=enforce_authority)
     if _legacy is not NO_OVERRIDE:
         return _legacy
