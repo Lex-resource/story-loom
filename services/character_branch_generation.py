@@ -18,9 +18,11 @@ from core.chapter_domain import ChapterDomain
 from models.character_branches import CharacterBranch, CharacterBranchChapter
 from models.novel import Job, Novel
 from services.character_branch_service import get_character_branch
+from services.chapter_continuity import writer_execution_brief
 from services.knowledge_patch_models import KnowledgePatchSet
 from services.novel_memory_atoms import record_patch_atoms
 from services.novel_memory_evidence import capture_chapter_extractor_evidence
+from services.chapter_content import effective_chapter_content
 from services.novel_memory_recall import recall_novel_memory
 from services.character_constants import (
     CHARACTER_BRANCH_CHAPTER_STATUS_FAILED,
@@ -137,7 +139,7 @@ def _branch_context(branch: CharacterBranch, chapter: CharacterBranchChapter, no
     state_text = json.dumps(character, ensure_ascii=False, indent=2)
     historical_docs = anchor.get("historical_docs") or {}
     previous_ending = (
-        (previous.content or previous.edited_content or previous.draft_content or "")[-3500:]
+        effective_chapter_content(previous)[-3500:]
         if previous
         else anchor.get("anchor_chapter_ending", "")
     )
@@ -169,6 +171,15 @@ def _branch_context(branch: CharacterBranch, chapter: CharacterBranchChapter, no
             "user_request": branch.user_request or "",
             "future_mainline_is_forbidden": True,
         }, ensure_ascii=False, indent=2),
+        # The branch graph does not run the mainline context-refresh step.
+        # Seed a minimal execution brief so the first Writer call still sees
+        # the branch continuation point before its chapter contract exists.
+        writer_execution_brief_context=writer_execution_brief(
+            None,
+            None,
+            novel_format=novel.novel_format or "long_webnovel",
+            fallback_previous_ending=previous_ending,
+        ),
         total_chapters=branch.target_chapters,
         word_count=int((branch.generation_config or {}).get("word_count") or CHARACTER_BRANCH_DEFAULT_WORD_COUNT),
     )
@@ -203,10 +214,11 @@ async def apply_branch_chapter_memory(
             from agents.pipeline import ExtractorNode
 
             extraction_context = copy.copy(context)
-            extraction_context.chapter_content = chapter.content or ""
+            chapter_content = effective_chapter_content(chapter)
+            extraction_context.chapter_content = chapter_content
             extractor_node = ExtractorNode()
             extractor_output = await extractor_node.run(
-                extraction_context, {"content": chapter.content}
+                extraction_context, {"content": chapter_content}
             )
             await extractor_node.agent.record_usage(
                 db, novel.id, chapter.chapter_index, AGENT_EXTRACTOR
@@ -227,7 +239,7 @@ async def apply_branch_chapter_memory(
                 branch_id=branch.id,
                 storyline_id=branch.storyline_id,
                 chapter_index=chapter.chapter_index,
-                chapter_content=chapter.content or "",
+                chapter_content=effective_chapter_content(chapter),
                 extractor_output=extractor_output,
             )
         if settings.ENABLE_NOVEL_MEMORY_ATOMS:

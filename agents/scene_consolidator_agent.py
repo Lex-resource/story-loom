@@ -22,6 +22,7 @@ from agents.constants import (
     CONSOLIDATION_TEMPERATURE,
     PROMPT_SCENE_BLOCK_CONSOLIDATION,
 )
+from agents.prompt_hints import append_missing_hints, hint_block
 from agents.writing_schemas import SceneBlockConsolidation
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,17 @@ class SceneConsolidatorAgent(AgentBase):
                 "\n".join(f"- {item}" for item in accepted_atoms) or "（无）"
             ),
             outline_summary=sanitize_untrusted_content(outline_summary or "（无）"),
+        )
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            chapter_title=hint_block("【章节标题】", chapter_title),
+            chapter_tail=hint_block("【章节结尾片段】", chapter_tail),
+            accepted_atoms=hint_block(
+                "【已确认事实】",
+                "\n".join(f"- {item}" for item in accepted_atoms) or "（无）",
+            ),
+            outline_summary=hint_block("【大纲摘要】", outline_summary or "（无）"),
         )
         result = await self.call_llm_json(
             sys_prompt,

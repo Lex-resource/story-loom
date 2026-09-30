@@ -1,7 +1,7 @@
 """短篇 Validator 判定语言与执行语言必须一致。
 
 短篇 validator 模板要求 LLM 用 `logic|consistency|pacing|payoff|viewpoint`
-(`prompts/validation/zhihu_short_validation.json`)，短篇表面宣布只有四类构成 block。
+（数据库 `prompt_templates` 表中的 `validator_validate_content` 模板），短篇表面宣布只有四类构成 block。
 在格式轴接管重试词表之前，`viewpoint` 与 `payoff` 都不在长篇词表里，
 `requires_content_retry` 因此返回 False，缺陷正文走 force_save 直接落盘。
 """

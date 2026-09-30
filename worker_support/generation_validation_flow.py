@@ -8,7 +8,10 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.constants import AGENT_VALIDATOR
+from agents.pipeline_context import PipelineContext
+from core.chapter_domain import ChapterDomain
 from services.stream_constants import STREAM_SOURCE_SYSTEM
+from services.chapter_content import effective_chapter_content
 from worker_support.context import MemoryManager
 from worker_support.events import GenerationEvents
 from worker_support.generation_editor_policy import mark_editor_skipped
@@ -154,9 +157,57 @@ async def run_saved_chapter_comprehensive_validation(
     chapter_index: int,
     validator_agent,
     on_validator_chunk=None,
+    *,
+    domain: ChapterDomain | None = None,
+    base_context: PipelineContext | None = None,
 ) -> dict[str, Any]:
-    mem_context = await MemoryManager.get_context(db, novel.id, chapter_index, f"第{chapter_index}章", agent_type="validator")
+    mem_context = await MemoryManager.get_context(
+        db,
+        novel.id,
+        chapter_index,
+        f"第{chapter_index}章",
+        agent_type="validator",
+        branch_id=domain.branch_id if domain else None,
+        storyline_id=domain.storyline_id if domain else "main",
+        previous_ending_override=(
+            base_context.previous_ending if base_context is not None else None
+        ),
+    )
+    if domain is not None and base_context is not None:
+        # Branch recall returns branch atoms only. Keep the frozen branch
+        # anchor fields alongside them for the validator's actual prompt.
+        for field in (
+            "novel_format",
+            "genre",
+            "style",
+            "world_state",
+            "character_state",
+            "raw_world_state",
+            "raw_character_state",
+            "foreshadowing",
+            "raw_foreshadowing",
+            "plot_threads",
+            "raw_plot_threads",
+            "character_card_context",
+            "previous_ending",
+            "context_sources",
+            "total_chapters",
+        ):
+            value = getattr(base_context, field, None)
+            if value not in (None, "", {}, []):
+                mem_context[field] = value
     mem_context["chapter_outline"] = chapter.outline or {}
+    if domain is None or not mem_context.get("character_card_context"):
+        from services.character_context import build_writer_character_context
+
+        mem_context["character_card_context"] = await build_writer_character_context(
+            db,
+            novel.id,
+            chapter_index,
+            mem_context["chapter_outline"].get("characters_involved", [])
+            if isinstance(mem_context["chapter_outline"], dict)
+            else [],
+        )
     mem_context["chapter_outline"], mem_context["chapter_contract"] = sanitize_outline_for_contract(
         mem_context["chapter_outline"],
         mem_context.get("chapter_handoff"),
@@ -170,7 +221,7 @@ async def run_saved_chapter_comprehensive_validation(
         novel,
         chapter_index,
         chapter.title or "",
-        chapter.edited_content or chapter.draft_content or "",
+        effective_chapter_content(chapter),
         mem_context["previous_ending"],
         mem_context,
         validator_agent,

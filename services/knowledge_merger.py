@@ -41,6 +41,7 @@ from services.novel_memory_atoms import (
 from services.novel_memory_conflicts import record_hard_conflicts
 from services.novel_memory_lifecycle import sweep_stale_atom_candidates
 from services.novel_memory_consolidation import consolidate_scene_summary
+from services.chapter_content import effective_chapter_content
 from services.novel_memory_conflicts import (
     is_hard_extractor_issue,
     resolve_conflicts_automatically,
@@ -120,7 +121,7 @@ async def _capture_evidence_and_atoms(
             db,
             project_id=novel.id,
             chapter_index=chapter.chapter_index,
-            chapter_content=chapter.content or "",
+            chapter_content=effective_chapter_content(chapter),
             extractor_output=extract_result,
         )
     memory_atoms = []
@@ -233,6 +234,7 @@ async def _promote_and_publish(
     只写事务内状态;真正的 commit 由调用方统一执行。
     """
     chapter_index = chapter.chapter_index
+    patch_set = KnowledgePatchSet.model_validate(extract_result or {})
     # Canonical services succeeded, so only the reviewed candidates can be
     # promoted. Conflicting candidates returned above as review items.
     accepted_memory_atoms = promote_reviewed_atom_candidates(atom_reviews)
@@ -268,7 +270,9 @@ async def _promote_and_publish(
 
     if settings.ENABLE_NOVEL_MEMORY_SCENE_BLOCKS:
         outline = chapter.outline if isinstance(chapter.outline, dict) else {}
-        summary = str(outline.get("summary") or (chapter.content or "")[:800]).strip()
+        summary = str(
+            outline.get("summary") or effective_chapter_content(chapter)[:800]
+        ).strip()
         if settings.ENABLE_SCENE_BLOCK_CONSOLIDATION:
             summary = (
                 await consolidate_scene_summary(db, novel, chapter, summary, accepted_memory_atoms)
@@ -307,7 +311,7 @@ async def _promote_and_publish(
             db,
             novel.id,
             chapter_index + 1,
-            previous_ending=(chapter.content or "")[-1800:],
+            previous_ending=effective_chapter_content(chapter)[-1800:],
         )
         await sync_narrative_index(
             db,
@@ -484,7 +488,7 @@ async def run_post_processing(
         db,
         novel.id,
         chapter.chapter_index,
-        f"{chapter.title or ''} {chapter.content[:1000] if chapter.content else ''}",
+        f"{chapter.title or ''} {effective_chapter_content(chapter)[:1000]}",
         outline_data,
         agent_type="extractor",
     )
@@ -494,7 +498,7 @@ async def run_post_processing(
         extractor_memory,
     )
     extractor_context.title = chapter.title or ""
-    extractor_context.chapter_content = chapter.content or ""
+    extractor_context.chapter_content = effective_chapter_content(chapter)
     extractor_context.chapter_outline = outline_data
     extractor_context.character_card_context = character_card_context
 
@@ -502,7 +506,10 @@ async def run_post_processing(
     extractor.agent.project_id = novel.id
     extractor.agent.current_chapter = chapter.chapter_index
 
-    extractor_output = await extractor.run(extractor_context, {"content": chapter.content})
+    extractor_output = await extractor.run(
+        extractor_context,
+        {"content": extractor_context.chapter_content},
+    )
     extract_result = extractor_output.payload
     await extractor.agent.record_usage(db, novel.id, chapter.chapter_index, AGENT_EXTRACTOR)
 

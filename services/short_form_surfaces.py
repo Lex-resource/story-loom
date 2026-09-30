@@ -207,7 +207,7 @@ def short_retry_categories() -> frozenset[str]:
     """短篇哪些类别的阻断级问题该退回 Writer 重写 —— 长篇基线加两类。
 
     短篇 validator 模板要求 LLM 用 `logic|consistency|pacing|payoff|viewpoint`
-    (`prompts/validation/zhihu_short_validation.json`)，而短篇表面（本文件的 validator
+    （数据库 `prompt_templates` 表中的短篇 validator 模板），而短篇表面（本文件的 validator
     hint）宣布只有四类构成 block：人称越权、与前文分节的事实冲突、开篇承诺被违背、
     关键反转毫无铺垫。对上长篇词表后，`consistency` 与 `logic` 能正常触发重写，
     **`viewpoint` 和 `payoff` 一个都不在**，于是这两类最致命的短篇缺陷反而走

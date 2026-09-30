@@ -1,3 +1,5 @@
+import json
+
 from agents.base import AgentBase, sanitize_untrusted_content, UNTRUSTED_CONTENT_SYSTEM_REMINDER, safe_format
 from agents.pipeline_context import PipelineContext
 from agents.constants import (
@@ -22,6 +24,7 @@ from agents.prompt_hints import (
     novel_memory_hint,
     previous_ending_for_prompt,
     reference_style_hint,
+    short_term_context_hint,
     vector_context_hint,
     writer_context_policy,
     writer_rewrite_requirements,
@@ -143,6 +146,10 @@ class WriterAgent(AgentBase):
             handoff_hint_value = continuity_handoff_hint(context.chapter_handoff_context)
             contract_hint_value = continuity_contract_hint(context.chapter_contract_context)
         narrative_index_hint_value = narrative_index_hint(context.narrative_index_context, "writer")
+        short_term_context_hint_value = short_term_context_hint(
+            context.short_term_context,
+            "writer",
+        )
 
         generation_hints = agent_generation_hints("writer", novel_format)
         sys_prompt = safe_format(
@@ -177,10 +184,19 @@ class WriterAgent(AgentBase):
             chapter_handoff_context=handoff_hint_value,
             chapter_contract_context=contract_hint_value,
             narrative_index_context=narrative_index_hint_value,
+            short_term_context=short_term_context_hint_value,
         )
         user_prompt = append_missing_hints(
             user_prompt,
             user_tmpl,
+            skeleton=hint_block("【全书骨架】", json.dumps(skeleton, ensure_ascii=False)),
+            world_state=hint_block("【当前世界状态】", world_state),
+            character_state=hint_block("【当前人物状态】", character_state),
+            plot_threads=hint_block("【当前剧情线】", plot_threads),
+            foreshadowing=hint_block("【当前伏笔账本】", foreshadowing),
+            issue_summaries=hint_block("【历史问题总结】", issue_summaries),
+            chapter_outline=hint_block("【本章大纲】", chapter_outline),
+            previous_ending=hint_block("【上一章结尾】", previous_ending),
             rewrite_instructions_hint=rewrite_instructions_hint,
             intervention_hint=intervention_hint_value,
             reference_style_hint=reference_style_hint_value,
@@ -193,6 +209,7 @@ class WriterAgent(AgentBase):
             chapter_handoff_context=handoff_hint_value,
             chapter_contract_context=contract_hint_value,
             narrative_index_context=narrative_index_hint_value,
+            short_term_context=short_term_context_hint_value,
         )
         user_prompt = compact_layered_prompt(user_prompt)
 

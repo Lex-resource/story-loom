@@ -1,5 +1,6 @@
 from agents.base import AgentBase, sanitize_untrusted_content, UNTRUSTED_CONTENT_SYSTEM_REMINDER, safe_format
 from agents.constants import ISSUE_CLASSIFIER_TEMPERATURE, PROMPT_ISSUE_CLASSIFIER_CLASSIFY_ISSUES
+from agents.prompt_hints import append_missing_hints, hint_block
 
 
 class IssueClassifierAgent(AgentBase):
@@ -23,5 +24,10 @@ class IssueClassifierAgent(AgentBase):
 
         sys_prompt = system_tmpl + UNTRUSTED_CONTENT_SYSTEM_REMINDER
         user_prompt = safe_format(user_tmpl, issues_text=sanitize_untrusted_content(issues_text))
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            issues_text=hint_block("【待分类问题】", issues_text),
+        )
 
         return await self.call_llm_json(sys_prompt, user_prompt, temperature=ISSUE_CLASSIFIER_TEMPERATURE)

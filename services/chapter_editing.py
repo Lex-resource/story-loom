@@ -9,6 +9,7 @@ from services.pipeline_transitions import set_chapter_pipeline_step
 from services.pipeline_types import ChapterStatus, PipelineStep
 from services.chapter_progress import assert_chapter_not_frozen
 from services.validator import validate_chapter
+from services.chapter_content import effective_chapter_content
 
 
 async def previous_chapter_ending(
@@ -23,9 +24,10 @@ async def previous_chapter_ending(
         )
     )
     prev_chapter = prev_result.scalar_one_or_none()
-    if not prev_chapter or not prev_chapter.content:
+    previous_content = effective_chapter_content(prev_chapter)
+    if not previous_content:
         return ""
-    return prev_chapter.content[-PREVIOUS_CHAPTER_ENDING_CHARS:]
+    return previous_content[-PREVIOUS_CHAPTER_ENDING_CHARS:]
 
 
 async def validate_and_apply_chapter_edit(

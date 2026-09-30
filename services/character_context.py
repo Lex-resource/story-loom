@@ -245,14 +245,18 @@ async def build_extractor_character_context(
                 if name in selected_names:
                     global_character_hints.append(item)
 
-    return _json_text({
-        **existing_context,
-        "chapter_context": max(0, chapter_index - 1),
-        "new_character_candidates": [
-            {"name": name, "card_exists": False}
-            for name in new_names
-        ],
-        "chapter_outline": outline_context,
-        "global_character_hints": global_character_hints,
-        "read_only": True,
-    })
+    return compact_json(
+        {
+            **existing_context,
+            "chapter_context": max(0, chapter_index - 1),
+            "new_character_candidates": [
+                {"name": name, "card_exists": False}
+                for name in new_names
+            ],
+            "chapter_outline": outline_context,
+            "global_character_hints": global_character_hints,
+            "read_only": True,
+        },
+        context_budget_for("extractor").character_chars,
+        label="extractor_character_context",
+    )

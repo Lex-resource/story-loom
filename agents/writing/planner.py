@@ -1,3 +1,4 @@
+import json
 from typing import Optional, Any
 from agents.base import AgentBase, sanitize_untrusted_content, UNTRUSTED_CONTENT_SYSTEM_REMINDER, safe_format
 from agents.pipeline_context import PipelineContext
@@ -26,6 +27,7 @@ from agents.prompt_hints import (
     novel_memory_hint,
     previous_ending_for_prompt,
     reference_style_hint,
+    short_term_context_hint,
 )
 from services.outline_hierarchy import (
     format_active_volume_hint,
@@ -85,6 +87,7 @@ class PlannerAgent(AgentBase):
         user_prompt_str = append_missing_hints(
             user_prompt_str,
             user_tmpl,
+            user_prompt=hint_block("【用户需求】", user_prompt),
             reference_style_hint=reference_style_hint_value,
             total_chapters_hint=total_chapters_hint_value,
         )
@@ -112,6 +115,7 @@ class PlannerAgent(AgentBase):
         user_prompt_str = append_missing_hints(
             user_prompt_str,
             user_tmpl,
+            user_prompt=hint_block("【用户灵感】", user_prompt),
             total_chapters_hint=total_chapters_hint_value,
         )
 
@@ -126,6 +130,11 @@ class PlannerAgent(AgentBase):
         )
         sys_prompt = system_tmpl + UNTRUSTED_CONTENT_SYSTEM_REMINDER
         user_prompt = safe_format(user_tmpl, brainstorm_text=sanitize_untrusted_content(brainstorm_text))
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            brainstorm_text=hint_block("【待整理的大纲文本】", brainstorm_text),
+        )
         return await self.call_llm_json(sys_prompt, user_prompt, on_chunk=on_chunk)
 
     async def generate_chapter_outline(
@@ -170,6 +179,10 @@ class PlannerAgent(AgentBase):
         handoff_hint_value = continuity_handoff_hint(context.chapter_handoff_context)
         contract_hint_value = continuity_contract_hint(context.chapter_contract_context)
         narrative_index_hint_value = narrative_index_hint(context.narrative_index_context, "planner")
+        short_term_context_hint_value = short_term_context_hint(
+            context.short_term_context,
+            "planner",
+        )
 
         continuity_instructions = chapter_contract_output_requirements(novel_format)
         generation_hints = agent_generation_hints("planner", novel_format)
@@ -198,19 +211,27 @@ class PlannerAgent(AgentBase):
             chapter_handoff_context=handoff_hint_value,
             chapter_contract_context=contract_hint_value,
             narrative_index_context=narrative_index_hint_value,
+            short_term_context=short_term_context_hint_value,
         )
         user_prompt = append_missing_hints(
             user_prompt,
             user_tmpl,
+            skeleton=hint_block("【全书骨架】", json.dumps(skeleton, ensure_ascii=False)),
+            active_entities_context=active_entities_context,
+            character_manifest_context=character_manifest_hint_value,
+            issue_summaries=sanitize_untrusted_content(issue_summaries),
+            chapter_index=hint_block("【当前章节序号】", str(chapter_index)),
+            total_chapters=hint_block("【总章节数】", str(total_chapters)),
+            previous_ending=hint_block("【上一章结尾】", previous_ending),
             intervention_hint=intervention_hint_value,
             reference_style_hint=reference_style_hint_value,
             full_manuscript_context=full_manuscript_context_hint,
             active_volume_hint=active_volume_hint_value,
-            character_manifest_context=character_manifest_hint_value,
             novel_memory_hint=novel_memory_hint_value,
             chapter_handoff_context=handoff_hint_value,
             chapter_contract_context=contract_hint_value,
             narrative_index_context=narrative_index_hint_value,
+            short_term_context=short_term_context_hint_value,
         )
         user_prompt = compact_layered_prompt(user_prompt)
 
@@ -229,6 +250,15 @@ class PlannerAgent(AgentBase):
             user_tmpl,
             current_outline=json.dumps(current_outline, ensure_ascii=False, indent=2),
             instruction=sanitize_untrusted_content(instruction)
+        )
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            current_outline=hint_block(
+                "【当前大纲】",
+                json.dumps(current_outline, ensure_ascii=False, indent=2),
+            ),
+            instruction=hint_block("【用户修改指令】", instruction),
         )
 
         return await self.call_llm_json(sys_prompt, user_prompt)
@@ -263,6 +293,19 @@ class PlannerAgent(AgentBase):
             foreshadowing=sanitize_untrusted_content(foreshadowing),
             plot_threads=sanitize_untrusted_content(plot_threads),
         )
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            skeleton=hint_block(
+                "【全书骨架】",
+                json.dumps(skeleton, ensure_ascii=False, indent=2),
+            ),
+            chapter_summaries=hint_block("【已创作章节概要】", chapter_summaries),
+            world_state=hint_block("【当前世界状态】", world_state),
+            character_state=hint_block("【当前人物状态】", character_state),
+            foreshadowing=hint_block("【当前伏笔账本】", foreshadowing),
+            plot_threads=hint_block("【当前剧情线】", plot_threads),
+        )
 
         return await self.call_llm_json(sys_prompt, user_prompt)
 
@@ -283,5 +326,10 @@ class PlannerAgent(AgentBase):
 
         sys_prompt = system_tmpl + UNTRUSTED_CONTENT_SYSTEM_REMINDER
         user_prompt = safe_format(user_tmpl, chapter_data=chapter_data)
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            chapter_data=hint_block("【分章大纲数据】", chapter_data),
+        )
 
         return await self.call_llm_json(sys_prompt, user_prompt)

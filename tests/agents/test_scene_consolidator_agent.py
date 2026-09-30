@@ -1,28 +1,19 @@
-import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from agents.constants import PROMPT_SCENE_BLOCK_CONSOLIDATION
 
+def test_scene_block_consolidation_template_required_for_both_formats():
+    from agents.constants import (
+        NOVEL_FORMAT_LONG_WEBNOVEL,
+        NOVEL_FORMAT_ZHIHU_SHORT,
+        PROMPT_SCENE_BLOCK_CONSOLIDATION,
+    )
+    from services.prompt_loader import REQUIRED_PROMPT_TEMPLATES
 
-ROOT = Path(__file__).resolve().parents[2]
-EXTRACTION_FILES = (
-    ROOT / "prompts" / "extraction" / "long_webnovel_extraction.json",
-    ROOT / "prompts" / "extraction" / "zhihu_short_extraction.json",
-)
-
-
-def test_scene_block_consolidation_template_registered_for_both_formats():
-    for path in EXTRACTION_FILES:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        match = [item for item in data if item.get("name") == PROMPT_SCENE_BLOCK_CONSOLIDATION]
-        assert len(match) == 1, f"{path.name} 缺少场景块整合模板"
-        template = match[0]
-        assert template["category"] in ("long_webnovel", "zhihu_short")
-        assert "{chapter_tail}" in template["user_prompt_template"]
-        assert "{accepted_atoms}" in template["user_prompt_template"]
+    required = set(REQUIRED_PROMPT_TEMPLATES)
+    assert (PROMPT_SCENE_BLOCK_CONSOLIDATION, NOVEL_FORMAT_LONG_WEBNOVEL) in required
+    assert (PROMPT_SCENE_BLOCK_CONSOLIDATION, NOVEL_FORMAT_ZHIHU_SHORT) in required
 
 
 def test_consolidator_agent_uses_consolidation_model(monkeypatch):

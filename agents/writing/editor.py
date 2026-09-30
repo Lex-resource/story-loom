@@ -1,3 +1,4 @@
+import json
 from typing import Optional, Any
 from agents.base import AgentBase, sanitize_untrusted_content, UNTRUSTED_CONTENT_SYSTEM_REMINDER, safe_format
 from agents.pipeline_context import PipelineContext
@@ -30,6 +31,7 @@ from agents.prompt_hints import (
     previous_ending_for_prompt,
     reference_style_hint,
     repair_surface_hints,
+    short_term_context_hint,
     validation_errors_hint,
     vector_context_hint,
 )
@@ -107,6 +109,10 @@ class EditorAgent(AgentBase):
         style = context.style
         novel_format = context.novel_format
         reference_style = context.reference_style
+        global_outline_hint_value = hint_block(
+            "【全书骨架】",
+            json.dumps(context.global_outline or {}, ensure_ascii=False),
+        )
 
         validation_errors_hint_value = validation_errors_hint(
             validation_errors,
@@ -127,6 +133,14 @@ class EditorAgent(AgentBase):
         handoff_hint_value = continuity_handoff_hint(context.chapter_handoff_context)
         contract_hint_value = continuity_contract_hint(context.chapter_contract_context)
         narrative_index_hint_value = narrative_index_hint(context.narrative_index_context, "editor")
+        short_term_context_hint_value = short_term_context_hint(
+            context.short_term_context,
+            "editor",
+        )
+        plot_threads_hint_value = hint_block(
+            "【当前主线进度】",
+            context.plot_threads,
+        )
         style_blacklist_hint_value = hint_block(
             "【AI腔黑名单 — 命中即为文笔缺陷，据此降低 writing_quality 并在 raw_issues 记 style 类问题】",
             "、".join(STYLE_BLACKLIST),
@@ -153,6 +167,7 @@ class EditorAgent(AgentBase):
             world_state=sanitize_untrusted_content(world_state),
             character_state=sanitize_untrusted_content(character_state),
             foreshadowing=sanitize_untrusted_content(foreshadowing),
+            plot_threads=sanitize_untrusted_content(context.plot_threads),
             issue_summaries=sanitize_untrusted_content(issue_summaries),
             chapter_outline=(
                 prompt_outline_for_agent(chapter_outline, agent_type="editor")
@@ -172,10 +187,22 @@ class EditorAgent(AgentBase):
             chapter_handoff_context=handoff_hint_value,
             chapter_contract_context=contract_hint_value,
             narrative_index_context=narrative_index_hint_value,
+            short_term_context=short_term_context_hint_value,
+            global_outline=global_outline_hint_value,
         )
         user_prompt = append_missing_hints(
             user_prompt,
             user_tmpl,
+            world_state=hint_block("【当前世界状态】", world_state),
+            character_state=hint_block("【当前人物状态】", character_state),
+            foreshadowing=hint_block("【当前伏笔账本】", foreshadowing),
+            plot_threads=plot_threads_hint_value,
+            genre=hint_block("【作品类型】", genre),
+            style=hint_block("【作品风格】", style),
+            issue_summaries=hint_block("【历史问题总结】", issue_summaries),
+            chapter_outline=hint_block("【本章大纲】", chapter_outline),
+            previous_ending=hint_block("【上一章结尾】", previous_ending),
+            draft_content=hint_block("【Writer 初稿】", draft_content),
             validation_errors_hint=validation_errors_hint_value,
             intervention_hint=intervention_hint_value,
             reference_style_hint=reference_style_hint_value,
@@ -187,6 +214,8 @@ class EditorAgent(AgentBase):
             chapter_handoff_context=handoff_hint_value,
             chapter_contract_context=contract_hint_value,
             narrative_index_context=narrative_index_hint_value,
+            short_term_context=short_term_context_hint_value,
+            global_outline=global_outline_hint_value,
         )
         user_prompt = compact_layered_prompt(user_prompt)
 
@@ -209,7 +238,17 @@ class EditorAgent(AgentBase):
         validation_errors: str = "",
         genre: str = "",
         style: str = "",
+        plot_threads: str = "",
+        short_term_context: str = "",
+        full_manuscript_context: str = "",
+        character_card_context: str = "",
+        novel_memory_context: str = "",
+        narrative_index_context: str = "",
+        chapter_handoff_context: str = "",
+        chapter_contract_context: str = "",
+        reference_style: str = "",
         on_chunk: Optional[Any] = None,
+        global_outline: str = "",
     ) -> dict:
         validation_errors_hint_value = validation_errors_hint(
             validation_errors,
@@ -227,6 +266,21 @@ class EditorAgent(AgentBase):
             + (repair_surface_hints("editor"))
             + UNTRUSTED_CONTENT_SYSTEM_REMINDER
         )
+        context_hints = {
+            "plot_threads": hint_block("【当前主线进度】", plot_threads),
+            "short_term_context": short_term_context_hint(short_term_context, "editor"),
+            "full_manuscript_context": hint_block("【短篇已写全文】", full_manuscript_context),
+            "character_card_context": hint_block("【角色卡与上一章状态】", character_card_context),
+            "novel_memory_hint": novel_memory_hint(novel_memory_context, "editor"),
+            "narrative_index_context": narrative_index_hint(narrative_index_context, "editor"),
+            "chapter_handoff_context": continuity_handoff_hint(chapter_handoff_context),
+            "chapter_contract_context": continuity_contract_hint(chapter_contract_context),
+            "reference_style_hint": reference_style_hint(reference_style),
+            "global_outline": hint_block(
+                "【全书骨架】",
+                global_outline,
+            ),
+        }
         user_prompt = safe_format(
             user_tmpl,
             genre=genre,
@@ -239,7 +293,24 @@ class EditorAgent(AgentBase):
             previous_ending=sanitize_untrusted_content(previous_ending),
             rewrite_reason=rewrite_reason,
             draft_content=sanitize_untrusted_content(draft_content),
-            validation_errors_hint=validation_errors_hint_value
+            validation_errors_hint=validation_errors_hint_value,
+            **context_hints,
+        )
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            world_state=hint_block("【当前世界状态】", world_state),
+            character_state=hint_block("【当前人物状态】", character_state),
+            foreshadowing=hint_block("【当前伏笔账本】", foreshadowing),
+            genre=hint_block("【作品类型】", genre),
+            style=hint_block("【作品风格】", style),
+            issue_summaries=hint_block("【历史问题总结】", issue_summaries),
+            chapter_outline=hint_block("【本章大纲】", chapter_outline),
+            previous_ending=hint_block("【上一章结尾】", previous_ending),
+            rewrite_reason=hint_block("【强制修订原因】", rewrite_reason),
+            draft_content=hint_block("【待修订正文】", draft_content),
+            validation_errors_hint=validation_errors_hint_value,
+            **context_hints,
         )
 
         return await self.call_llm_json(
@@ -261,7 +332,16 @@ class EditorAgent(AgentBase):
         genre: str = "",
         style: str = "",
         reference_style: str = "",
+        plot_threads: str = "",
+        short_term_context: str = "",
+        full_manuscript_context: str = "",
+        character_card_context: str = "",
+        novel_memory_context: str = "",
+        narrative_index_context: str = "",
+        chapter_handoff_context: str = "",
+        chapter_contract_context: str = "",
         on_chunk: Optional[Any] = None,
+        global_outline: str = "",
     ) -> dict:
         """Style-only repair pass: strip AI-cliché prose, vary sentence rhythm.
 
@@ -299,6 +379,17 @@ class EditorAgent(AgentBase):
             )
             + UNTRUSTED_CONTENT_SYSTEM_REMINDER
         )
+        context_hints = {
+            "plot_threads": hint_block("【当前主线进度】", plot_threads),
+            "short_term_context": short_term_context_hint(short_term_context, "editor"),
+            "full_manuscript_context": hint_block("【短篇已写全文】", full_manuscript_context),
+            "character_card_context": hint_block("【角色卡与上一章状态】", character_card_context),
+            "novel_memory_hint": novel_memory_hint(novel_memory_context, "editor"),
+            "narrative_index_context": narrative_index_hint(narrative_index_context, "editor"),
+            "chapter_handoff_context": continuity_handoff_hint(chapter_handoff_context),
+            "chapter_contract_context": continuity_contract_hint(chapter_contract_context),
+            "global_outline": hint_block("【全书骨架】", global_outline),
+        }
         user_prompt = safe_format(
             user_tmpl,
             genre=genre,
@@ -313,13 +404,24 @@ class EditorAgent(AgentBase):
             style_issues_hint=style_issues_hint_value,
             style_blacklist_hint=style_blacklist_hint_value,
             reference_style_hint=reference_style_hint_value,
+            **context_hints,
         )
         user_prompt = append_missing_hints(
             user_prompt,
             user_tmpl,
+            world_state=hint_block("【当前世界状态】", world_state),
+            character_state=hint_block("【当前人物状态】", character_state),
+            foreshadowing=hint_block("【当前伏笔账本】", foreshadowing),
+            genre=hint_block("【作品类型】", genre),
+            style=hint_block("【作品风格】", style),
+            issue_summaries=hint_block("【历史问题总结】", issue_summaries),
+            chapter_outline=hint_block("【本章大纲】", chapter_outline),
+            previous_ending=hint_block("【上一章结尾】", previous_ending),
+            draft_content=hint_block("【待精修正文】", draft_content),
             style_issues_hint=style_issues_hint_value,
             style_blacklist_hint=style_blacklist_hint_value,
             reference_style_hint=reference_style_hint_value,
+            **context_hints,
         )
 
         return await self.call_llm_json(

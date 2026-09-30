@@ -12,6 +12,7 @@ from agents.constants import (
     KEY_CHAPTER_STAGES,
 )
 from agents.pipeline_context import PipelineContext
+from core.chapter_domain import ChapterDomain
 from services.validator import style_quality_score
 from worker_support.chapter_repository import get_chapter_by_index
 from worker_support.context import MemoryManager
@@ -39,6 +40,9 @@ async def load_writer_context(
     novel,
     chapter_index: int,
     outline_data: dict,
+    *,
+    domain: ChapterDomain | None = None,
+    base_context: PipelineContext | None = None,
 ) -> WriterContext:
     writer_query = writer_query_from_outline(outline_data)
     memory = await MemoryManager.get_context(
@@ -48,13 +52,53 @@ async def load_writer_context(
         writer_query,
         outline_data,
         agent_type="writer",
+        branch_id=domain.branch_id if domain else None,
+        storyline_id=domain.storyline_id if domain else "main",
+        previous_ending_override=(
+            base_context.previous_ending if base_context is not None else None
+        ),
     )
-    memory["character_card_context"] = await build_writer_character_context(
-        db,
-        novel.id,
-        chapter_index,
-        outline_data.get("characters_involved", []),
-    )
+    # Repair and style-only Editor passes receive the same book-level contract
+    # as the main review. MemoryManager intentionally does not own the outline,
+    # so preserve it from the pipeline context across context refreshes.
+    if base_context is not None and base_context.global_outline:
+        memory["global_outline"] = base_context.global_outline
+
+    # Branch jobs carry their anchor state in the in-memory PipelineContext;
+    # the branch recall path intentionally returns only branch-scoped atoms.
+    # Overlay those stable anchor fields so a refresh cannot silently switch
+    # the Writer back to the mainline settings or character card.
+    if domain is not None and base_context is not None:
+        for field in (
+            "novel_format",
+            "genre",
+            "style",
+            "world_state",
+            "character_state",
+            "raw_world_state",
+            "raw_character_state",
+            "foreshadowing",
+            "raw_foreshadowing",
+            "plot_threads",
+            "raw_plot_threads",
+            "character_card_context",
+            "previous_ending",
+            "context_sources",
+            "total_chapters",
+        ):
+            value = getattr(base_context, field, None)
+            if value not in (None, "", {}, []):
+                memory[field] = value
+
+    if domain is None or base_context is None or not base_context.character_card_context:
+        memory["character_card_context"] = await build_writer_character_context(
+            db,
+            novel.id,
+            chapter_index,
+            outline_data.get("characters_involved", []),
+        )
+    elif base_context.character_card_context:
+        memory["character_card_context"] = base_context.character_card_context
     memory["novel_memory_context"] = remove_authority_duplicates(
         memory.get("character_card_context", ""),
         memory.get("novel_memory_context", ""),
@@ -75,14 +119,13 @@ async def load_writer_context(
         memory.get("chapter_contract"),
         novel_format=novel.novel_format,
         outline=outline_data,
+        fallback_previous_ending=memory.get("previous_ending", ""),
     )
     memory.setdefault("context_sources", {})["writer_execution_brief_context"] = {
         "source_ref": f"chapter:{chapter_index}:writer-execution-brief",
         "source_chapter": chapter_index,
         "authority": "accepted_projection",
     }
-    memory["chapter_handoff_context"] = ""
-    memory["chapter_contract_context"] = ""
     pipeline = PipelineContext.from_memory(str(novel.id), chapter_index, memory)
     return WriterContext(memory=memory, pipeline=pipeline)
 
@@ -109,9 +152,8 @@ def prepare_writer_pipeline_context(
         contract,
         novel_format=pipeline_context.novel_format,
         outline=outline_data,
+        fallback_previous_ending=pipeline_context.previous_ending,
     )
-    pipeline_context.chapter_handoff_context = ""
-    pipeline_context.chapter_contract_context = ""
     return pipeline_context
 
 

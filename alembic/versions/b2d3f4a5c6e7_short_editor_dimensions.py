@@ -17,8 +17,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 # 短篇 Editor 的响应 schema（EditorShortFormEvaluations）现在要求 hook_strength 与
-# emotional_landing。数据库是提示词的运行时权威来源，而 seed_prompts_to_database 只补
-# 缺失行、不覆盖既有行 —— 所以文件里改了不等于库里改了，需要这次数据迁移。
+# emotional_landing。数据库是提示词的运行时权威来源，所以需要用数据迁移更新现有行。
 #
 # 刻意做**定向替换**而不是整段覆盖：用户可能已经在系统配置页改过这些提示词，
 # 整段覆盖会吞掉他们的修改。替换点只有评分块和「五维」措辞。

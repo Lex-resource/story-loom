@@ -36,6 +36,26 @@ def vector_context_hint(vector_context: str) -> str:
     return hint_block("【相关背景补充】", vector_context)
 
 
+def short_term_context_hint(short_term_context: str, agent_type: str = "writer") -> str:
+    """Render the preceding-chapter summary cache for every generation role.
+
+    Long-form memory assembly has always produced this projection, but it was
+    previously left on ``PipelineContext`` without a prompt consumer. Keep the
+    block optional so short-form workflows, which use ``full_manuscript_context``
+    instead, do not receive an empty or duplicate section.
+    """
+    if not short_term_context:
+        return ""
+    return hint_block(
+        f"【前序章节剧情线索·{agent_type}】",
+        short_term_context,
+        suffix=(
+            "\n\n使用边界：这是前序章节的摘要线索，用于承接人物位置、主线和伏笔进度；"
+            "以已发布正文、交接包和本章契约为准，不得把摘要中的推测补成新事实。"
+        ),
+    )
+
+
 def narrative_index_hint(index_context: str, agent_type: str = "writer") -> str:
     """Render accepted narrative projections as bounded continuity guidance."""
     if not index_context:
@@ -469,17 +489,16 @@ def v43_bounded_hypothesis_progression_hint(agent_type: str) -> str:
 # ---------------------------------------------------------------------------
 # 冻结的 A28/V43 生产表面
 # ---------------------------------------------------------------------------
-# 以下每个 agent 的 hint 栈就是 PRODUCTION.md 验证过的 A28/V43 配置
+# 以下每个 agent 的 hint 栈构成长篇 A28/V43 生产配置
 # （七维平均 8.601、9/9 章零内容重试）。函数名保留 vNN_ 前缀，使每条规则仍能
-# 追溯到 docs/research/ 里的版本记录。
+# 冻结行为说明见 docs/production-prompt-surface.md。
 #
 # 各 agent 的栈**不相同**，这是实测确认的，不要"统一"它们：
 #   * writer    以 v35_writer_narrative_hint 收尾（不是 v34+v32）
 #   * extractor 比其他 agent 多一个 v33_memory_update_protocol_hint
 #   * validator 另在 sys_prompt 末尾无条件追加 v7_continuity_state_hint
 #
-# 研究版本（V44–V66）通过 services/version_surface.research_override 整体替换
-# 这里的返回值，而不是在栈里叠加。
+# 本地实验环境可以通过 services/version_surface 提供额外覆盖；生产默认使用这里的栈。
 
 _V43_COMMON_TAIL = (
     v41_narrative_escalation_hint,
@@ -649,8 +668,7 @@ def writer_rewrite_requirements() -> str:
 def repair_surface_hints(agent_type: str) -> str:
     """Editor 强制修订 / 去风格化，以及 Extractor 辅助抽取路径上的额外 hint。
 
-    A28/V43 下这些路径不附加额外 hint（对应的链整段起于 V50）。研究运行
-    V50+ 会由覆盖层给出内容。
+    A28/V43 下这些路径不附加额外 hint；生产默认不启用额外修订链。
     """
     from services.version_surface import NO_OVERRIDE, research_override
 

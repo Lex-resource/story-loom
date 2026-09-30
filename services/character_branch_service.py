@@ -14,6 +14,7 @@ from models.character_branches import CharacterBranch, CharacterBranchChapter
 from models.characters import CharacterArc, CharacterCard, CharacterRelationship
 from models.novel import Chapter, Job, Novel
 from services.character_card_service import get_state_at_chapter
+from services.chapter_content import effective_chapter_content
 from services.character_constants import (
     CHARACTER_BRANCH_ANCHOR_CONTEXT_MAX_CHARS,
     CHARACTER_BRANCH_AUTO_DISCOVERY_ENABLED_DEFAULT,
@@ -149,7 +150,7 @@ async def _build_anchor_context(
             "end_state": outline.get("end_state", ""),
         })
         if chapter.chapter_index == anchor_main_chapter:
-            anchor_chapter_content = (chapter.content or chapter.edited_content or chapter.draft_content or "")[-4000:]
+            anchor_chapter_content = effective_chapter_content(chapter)[-4000:]
 
     card_payload = {
         "character_id": str(card.id),

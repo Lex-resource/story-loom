@@ -12,6 +12,7 @@ from services.character_constants import (
     CHARACTER_BRANCH_VECTOR_ITEM_ID_TEMPLATE,
     CHARACTER_BRANCH_VECTOR_SOURCE,
 )
+from services.chapter_content import effective_chapter_content
 from services.pipeline_types import VectorOutboxStatus
 
 
@@ -24,7 +25,7 @@ async def enqueue_branch_chapter_vector(
     branch: CharacterBranch,
     chapter: CharacterBranchChapter,
 ) -> VectorOutbox:
-    content = chapter.content or chapter.edited_content or chapter.draft_content or ""
+    content = effective_chapter_content(chapter)
     item_id = CHARACTER_BRANCH_VECTOR_ITEM_ID_TEMPLATE.format(
         branch_id=branch.id,
         chapter_index=chapter.chapter_index,

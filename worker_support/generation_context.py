@@ -13,8 +13,6 @@ from models.novel import IssueSummary
 
 
 USER_INTERVENTION_PREFIX = "用户实时插话干预："
-SHORT_TERM_CONTEXT_HEADER = "【前序章节剧情线索（分级记忆短期缓存）】"
-PREVIOUS_ENDING_HEADER = "【上一章结尾细节】"
 
 
 def append_user_intervention(custom_prompt: str | None, intervention: str | None) -> str | None:
@@ -23,15 +21,6 @@ def append_user_intervention(custom_prompt: str | None, intervention: str | None
     if custom_prompt:
         return f"{custom_prompt}\n- {USER_INTERVENTION_PREFIX}{intervention}"
     return f"{USER_INTERVENTION_PREFIX}{intervention}"
-
-
-def with_short_term_context(previous_ending: str, short_term_context: str | None) -> str:
-    if not short_term_context:
-        return previous_ending
-    return (
-        f"{SHORT_TERM_CONTEXT_HEADER}\n{short_term_context}\n\n"
-        f"{PREVIOUS_ENDING_HEADER}\n{previous_ending}"
-    )
 
 
 def append_succeeding_beginning_warning(

@@ -224,8 +224,7 @@ def _retryable_categories(novel_format: str | None) -> frozenset[str]:
     """该工作流里哪些类别的阻断级问题值得退回 Writer 重写。
 
     长篇（及一切继承 frozen_v43 的自定义工作流）让路到 A28/V43 基线。短篇的 validator
-    模板产出 `logic|consistency|pacing|payoff|viewpoint`（prompts/validation/
-    zhihu_short_validation.json），其中 `viewpoint`（人称越权）与 `payoff`（开篇承诺被
+    模板产出 `logic|consistency|pacing|payoff|viewpoint`（数据库中的短篇 validator 模板），其中 `viewpoint`（人称越权）与 `payoff`（开篇承诺被
     违背）是短篇表面明确宣布的四种 block 中的两种，却都不在长篇词表里 —— 于是
     `requires_content_retry` 返回 False，缺陷正文走 `force_save_validator_result` 直接落盘
     并被标成 `passed=True`。格式轴接管这份词表就是为了修掉这条。

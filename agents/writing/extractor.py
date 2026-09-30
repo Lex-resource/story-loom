@@ -11,14 +11,17 @@ from agents.constants import (
 )
 from agents.pipeline_context import PipelineContext
 from agents.prompt_hints import (
+    append_missing_hints,
     authority_boundary_hint,
     agent_context_policy,
     continuity_contract_hint,
     continuity_handoff_hint,
     generation_hints as agent_generation_hints,
+    hint_block,
     narrative_index_hint,
     novel_memory_hint,
     repair_surface_hints,
+    short_term_context_hint,
     v42_authority_locked_progression_hint,
     v43_bounded_hypothesis_progression_hint,
 )
@@ -66,6 +69,25 @@ class ExtractorAgent(AgentBase):
 
         generation_hints = agent_generation_hints("extractor", novel_format)
         sys_prompt = safe_format(system_tmpl, chapter_index=chapter_index) + authority_boundary_hint() + generation_hints + UNTRUSTED_CONTENT_SYSTEM_REMINDER
+        extra_context_hints = {
+            "novel_memory_hint": novel_memory_hint(context.novel_memory_context, "extractor"),
+            "short_term_context": short_term_context_hint(context.short_term_context, "extractor"),
+            "full_manuscript_context": hint_block(
+                "【前序章节全文上下文】",
+                context.full_manuscript_context,
+            ),
+            "character_card_context": hint_block(
+                "【角色卡与上一章状态】",
+                context.character_card_context,
+            ),
+            "chapter_handoff_context": continuity_handoff_hint(context.chapter_handoff_context),
+            "chapter_contract_context": continuity_contract_hint(context.chapter_contract_context),
+            "narrative_index_context": narrative_index_hint(context.narrative_index_context, "extractor"),
+            "chapter_outline": hint_block(
+                "【本章计划（仅作计划参考，不视为已发生事实）】",
+                json.dumps(context.chapter_outline or {}, ensure_ascii=False),
+            ),
+        }
         user_prompt = safe_format(
             user_tmpl,
             world_state=sanitize_untrusted_content(world_state),
@@ -75,11 +97,20 @@ class ExtractorAgent(AgentBase):
             chapter_content=sanitize_untrusted_content(chapter_content),
             chapter_index=chapter_index,
             change_candidates=sanitize_untrusted_content(change_candidates),
+            **extra_context_hints,
         )
-        user_prompt += novel_memory_hint(context.novel_memory_context, "extractor")
-        user_prompt += continuity_handoff_hint(context.chapter_handoff_context)
-        user_prompt += continuity_contract_hint(context.chapter_contract_context)
-        user_prompt += narrative_index_hint(context.narrative_index_context, "extractor")
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            world_state=hint_block("【已有世界状态】", world_state),
+            character_state=hint_block("【已有角色状态】", character_state),
+            foreshadowing=hint_block("【已有伏笔账本】", foreshadowing),
+            plot_threads=hint_block("【已有剧情线】", plot_threads),
+            chapter_content=hint_block("【当前章节正文】", chapter_content),
+            chapter_index=hint_block("【当前章节序号】", str(chapter_index)),
+            change_candidates=hint_block("【变更候选摘要】", change_candidates),
+            **extra_context_hints,
+        )
 
         # 延迟 import 以避免 agents → services 反向依赖
         from services.knowledge_patch_models import KnowledgePatchSet
@@ -117,6 +148,39 @@ class ExtractorAgent(AgentBase):
             chapter_index=context.chapter_index,
             character_card_context=sanitize_untrusted_content(context.character_card_context),
             chapter_content=sanitize_untrusted_content(context.chapter_content),
+            global_character_hints=hint_block(
+                "【全局角色设定提示】",
+                context.character_manifest_context,
+            ),
+            character_manifest_context=hint_block(
+                "【角色人物志】",
+                context.character_manifest_context,
+            ),
+            chapter_outline=hint_block(
+                "【本章计划（仅作计划参考，不视为已发生事实）】",
+                json.dumps(context.chapter_outline or {}, ensure_ascii=False),
+            ),
+        )
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            chapter_index=hint_block("【当前章节序号】", str(context.chapter_index)),
+            character_card_context=hint_block(
+                "【角色卡与上一章状态】", context.character_card_context
+            ),
+            chapter_content=hint_block("【当前章节正文】", context.chapter_content),
+            global_character_hints=hint_block(
+                "【全局角色设定提示】",
+                context.character_manifest_context,
+            ),
+            character_manifest_context=hint_block(
+                "【角色人物志】",
+                context.character_manifest_context,
+            ),
+            chapter_outline=hint_block(
+                "【本章计划（仅作计划参考，不视为已发生事实）】",
+                json.dumps(context.chapter_outline or {}, ensure_ascii=False),
+            ),
         )
         response = await self.call_llm_json(
             sys_prompt,
@@ -144,6 +208,25 @@ class ExtractorAgent(AgentBase):
             + CHARACTER_FACT_SOURCE_RULES
             + UNTRUSTED_CONTENT_SYSTEM_REMINDER
         )
+        extra_context_hints = {
+            "short_term_context": short_term_context_hint(context.short_term_context, "extractor"),
+            "full_manuscript_context": hint_block(
+                "【前序章节全文上下文】",
+                context.full_manuscript_context,
+            ),
+            "character_card_context": hint_block(
+                "【角色卡与上一章状态】",
+                context.character_card_context,
+            ),
+            "novel_memory_hint": novel_memory_hint(context.novel_memory_context, "extractor"),
+            "chapter_handoff_context": continuity_handoff_hint(context.chapter_handoff_context),
+            "chapter_contract_context": continuity_contract_hint(context.chapter_contract_context),
+            "narrative_index_context": narrative_index_hint(context.narrative_index_context, "extractor"),
+            "chapter_outline": hint_block(
+                "【本章计划（仅作计划参考，不视为已发生事实）】",
+                json.dumps(context.chapter_outline or {}, ensure_ascii=False),
+            ),
+        }
         user_prompt = safe_format(
             user_tmpl,
             world_state=sanitize_untrusted_content(context.world_state),
@@ -152,8 +235,19 @@ class ExtractorAgent(AgentBase):
             plot_threads=sanitize_untrusted_content(context.plot_threads),
             chapter_content=sanitize_untrusted_content(context.chapter_content),
             chapter_index=context.chapter_index,
+            **extra_context_hints,
         )
-        user_prompt += narrative_index_hint(context.narrative_index_context, "extractor")
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            world_state=hint_block("【已有世界状态】", context.world_state),
+            character_state=hint_block("【已有角色状态】", context.character_state),
+            foreshadowing=hint_block("【已有伏笔账本】", context.foreshadowing),
+            plot_threads=hint_block("【已有剧情线】", context.plot_threads),
+            chapter_content=hint_block("【当前章节正文】", context.chapter_content),
+            chapter_index=hint_block("【当前章节序号】", str(context.chapter_index)),
+            **extra_context_hints,
+        )
         return await self.call_llm_json(
             sys_prompt,
             user_prompt,

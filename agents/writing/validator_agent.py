@@ -14,14 +14,17 @@ from agents.constants import (
 )
 from agents.prompt_hints import (
     agent_context_policy,
+    append_missing_hints,
     authority_boundary_hint,
     compact_layered_prompt,
     continuity_contract_hint,
     continuity_handoff_hint,
     generation_hints as agent_generation_hints,
+    hint_block,
     narrative_index_hint,
     novel_memory_hint,
     previous_ending_for_prompt,
+    short_term_context_hint,
     validator_extra_requirements,
     validator_trailing_hint,
 )
@@ -49,12 +52,17 @@ class ValidatorAgent(AgentBase):
             context.chapter_contract_context = ""
         title = context.title
         content = context.chapter_content
+        short_term_context_hint_value = short_term_context_hint(
+            context.short_term_context,
+            "validator",
+        )
         active_entities_context = "\n".join(filter(None, [
             f"【短篇已写全文】\n{sanitize_untrusted_content(context.full_manuscript_context)}" if context.full_manuscript_context else None,
             f"【全局状态】\n{sanitize_untrusted_content(context.world_state)}" if context.world_state else None,
             f"【人物状态】\n{sanitize_untrusted_content(context.character_state)}" if context.character_state else None,
             f"【伏笔账本】\n{sanitize_untrusted_content(context.foreshadowing)}" if context.foreshadowing else None,
             f"【主线进度】\n{sanitize_untrusted_content(context.plot_threads)}" if context.plot_threads else None,
+            short_term_context_hint_value,
             f"【角色卡事实约束】\n{sanitize_untrusted_content(context.character_card_context)}" if context.character_card_context else None,
             novel_memory_hint(context.novel_memory_context, "validator"),
             continuity_handoff_hint(context.chapter_handoff_context),
@@ -88,7 +96,23 @@ class ValidatorAgent(AgentBase):
                 content=sanitize_untrusted_content(content),
                 active_entities_context=active_entities_context,
                 global_outline=context.global_outline,
-                short_term_context=active_entities_context,
+                short_term_context=short_term_context_hint_value,
+                previous_ending=sanitize_untrusted_content(previous_ending),
+                full_manuscript_context=sanitize_untrusted_content(context.full_manuscript_context),
+            )
+            user_prompt = append_missing_hints(
+                user_prompt,
+                user_tmpl,
+                title=hint_block("【章节标题】", title),
+                genre=hint_block("【作品类型】", genre),
+                style=hint_block("【作品风格】", style),
+                content=hint_block("【待校验正文】", content),
+                active_entities_context=active_entities_context,
+                global_outline=hint_block(
+                    "【全书骨架】",
+                    json.dumps(context.global_outline or {}, ensure_ascii=False),
+                ),
+                short_term_context=short_term_context_hint_value,
                 previous_ending=sanitize_untrusted_content(previous_ending),
                 full_manuscript_context=sanitize_untrusted_content(context.full_manuscript_context),
             )
@@ -111,6 +135,11 @@ class ValidatorAgent(AgentBase):
 
         sys_prompt = system_tmpl + UNTRUSTED_CONTENT_SYSTEM_REMINDER
         user_prompt = safe_format(user_tmpl, content=sanitize_untrusted_content(content))
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            content=hint_block("【待提取实体的正文】", content),
+        )
 
         res = await self.call_llm_json(sys_prompt, user_prompt, temperature=VALIDATOR_EXTRACT_TEMPERATURE)
         return res.get("entities", [])
@@ -125,14 +154,22 @@ class ValidatorAgent(AgentBase):
             PROMPT_VALIDATOR_REVIEW_FULL_STORY,
             category=category,
         )
+        user_prompt = safe_format(
+            user_tmpl,
+            title=sanitize_untrusted_content(title),
+            outline=outline,
+            manuscript=sanitize_untrusted_content(manuscript),
+        )
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            title=hint_block("【作品标题】", title),
+            outline=hint_block("【全书骨架】", json.dumps(outline or {}, ensure_ascii=False)),
+            manuscript=hint_block("【完整正文】", manuscript),
+        )
         return await self.call_llm_json(
             system_tmpl + UNTRUSTED_CONTENT_SYSTEM_REMINDER,
-            safe_format(
-                user_tmpl,
-                title=sanitize_untrusted_content(title),
-                outline=outline,
-                manuscript=sanitize_untrusted_content(manuscript),
-            ),
+            user_prompt,
             temperature=VALIDATOR_TEMPERATURE,
             max_tokens=VALIDATOR_MAX_TOKENS,
         )

@@ -52,24 +52,11 @@ async def lifespan(app: FastAPI):
 
     try:
         from database import async_session
-        from services.prompt_loader import seed_prompts_to_database
+        from services.prompt_loader import find_missing_required_prompt_templates
         async with async_session() as session:
-            await seed_prompts_to_database(session)
-    except Exception:
-        logger.exception("prompt_seed_failed")
-
-    try:
-        from database import async_session
-        from sqlalchemy import select
-        from models.novel import PromptTemplate
-        from services.prompt_loader import REQUIRED_PROMPT_TEMPLATES
-        async with async_session() as session:
-            for name, cat in REQUIRED_PROMPT_TEMPLATES:
-                res = await session.execute(select(PromptTemplate).where(
-                    PromptTemplate.name == name, PromptTemplate.category == cat
-                ))
-                if not res.scalars().first():
-                    logger.warning("required_prompt_missing name=%s category=%s", name, cat)
+            missing = await find_missing_required_prompt_templates(session)
+            for name, category in missing:
+                logger.warning("required_prompt_missing name=%s category=%s", name, category)
     except Exception:
         logger.exception("required_prompt_check_failed")
 

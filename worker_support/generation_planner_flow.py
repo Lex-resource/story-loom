@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.chapter_domain import ChapterDomain
 from worker_support.chapter_repository import get_succeeding_chapter_beginning
 from worker_support.context import MemoryManager
 from worker_support.generation_context import (

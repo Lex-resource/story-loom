@@ -12,6 +12,7 @@ from agents.base import (
     sanitize_untrusted_content,
 )
 from agents.constants import CHARACTER_CARD_TEMPERATURE, PROMPT_CHARACTER_GENERATE_CARDS
+from agents.prompt_hints import append_missing_hints, hint_block
 from services.character_types import CharacterCardGenerationResponse
 
 
@@ -39,6 +40,19 @@ class CharacterCardAgent(AgentBase):
                 json.dumps(character_hints, ensure_ascii=False, indent=2)
             ),
             user_hints=sanitize_untrusted_content(user_hints or "（无）"),
+        )
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            project_context=hint_block(
+                "【作品信息】",
+                json.dumps(project_context, ensure_ascii=False, indent=2),
+            ),
+            character_hints=hint_block(
+                "【角色线索】",
+                json.dumps(character_hints, ensure_ascii=False, indent=2),
+            ),
+            user_hints=hint_block("【用户补充要求】", user_hints or "（无）"),
         )
         return await self.call_llm_json(
             system_tmpl + UNTRUSTED_CONTENT_SYSTEM_REMINDER,

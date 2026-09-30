@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.pipeline_context import PipelineContext
 from config import settings
+from models.knowledge import SettingsDoc
 from models.novel import Chapter, Novel
 from services.chapter_continuity import build_chapter_handoff
+from services.chapter_content import effective_chapter_content
 from services.context_compaction import context_budget_for
 from services.novel_constants import (
     CHAPTER_SUMMARY_PREVIEW_CHARS,
@@ -99,7 +101,7 @@ def _pick_short_suffix_start(
 def _rendered_short_blocks_len(chapters: list) -> int:
     blocks = []
     for chapter in chapters:
-        content = chapter.content or chapter.edited_content or chapter.draft_content or ""
+        content = effective_chapter_content(chapter)
         if not content:
             continue
         blocks.append(
@@ -182,9 +184,10 @@ class MemoryManager:
             )
         )
         prev_chapter = prev_result.scalar_one_or_none()
+        previous_content = effective_chapter_content(prev_chapter)
         previous_ending = (
-            prev_chapter.content[-PREVIOUS_CHAPTER_ENDING_CHARS_FOR_CONTEXT:]
-            if prev_chapter and prev_chapter.content
+            previous_content[-PREVIOUS_CHAPTER_ENDING_CHARS_FOR_CONTEXT:]
+            if previous_content
             else ""
         )
 
@@ -229,9 +232,13 @@ class MemoryManager:
                         logger.warning(
                             f"[Context WARN] Failed to parse chapter {chapter.chapter_index} outline JSON: {exc}"
                         )
-                if not chapter_summary and chapter.draft_content:
+                if not chapter_summary:
+                    chapter_content = effective_chapter_content(chapter)
+                else:
+                    chapter_content = ""
+                if not chapter_summary and chapter_content:
                     chapter_summary = (
-                        chapter.draft_content[:CHAPTER_SUMMARY_PREVIEW_CHARS].strip() + "..."
+                        chapter_content[:CHAPTER_SUMMARY_PREVIEW_CHARS].strip() + "..."
                     )
                 short_term_summaries.append(
                     f"第{chapter.chapter_index}章《{chapter.title}》梗概: {chapter_summary}"
@@ -276,19 +283,78 @@ class MemoryManager:
             if novel and novel.outline and isinstance(novel.outline, dict)
             else None
         )
+        category_fields = {
+            "world_rule": "world_state",
+            "character": "character_state",
+            "foreshadowing": "foreshadowing",
+            "plot_thread": "plot_threads",
+        }
+        grouped_docs: dict[str, list[SettingsDoc]] = {
+            field: [] for field in category_fields.values()
+        }
+        try:
+            result = await db.execute(
+                select(SettingsDoc)
+                .where(
+                    SettingsDoc.project_id == project_id,
+                    SettingsDoc.is_active.is_(True),
+                )
+                .order_by(SettingsDoc.category, SettingsDoc.updated_at.desc())
+            )
+            for doc in result.scalars().all():
+                field = category_fields.get(str(doc.category or ""))
+                if field:
+                    grouped_docs[field].append(doc)
+        except Exception:
+            # Legacy settings are a fallback only. A partially migrated project
+            # must still be able to use the layered memory path.
+            logger.warning(
+                "[Context WARN] Failed to load canonical settings docs",
+                exc_info=True,
+            )
+            try:
+                await db.rollback()
+            except Exception:
+                logger.warning("[Context WARN] Failed to rollback settings-doc read", exc_info=True)
+
+        def render_docs(field: str) -> str:
+            blocks = []
+            for doc in grouped_docs[field]:
+                name = str(doc.name or "").strip()
+                content = str(doc.content or "").strip()
+                if not content:
+                    continue
+                blocks.append(f"## {name}\n{content}" if name else content)
+            return "\n\n".join(blocks)
+
+        def doc_payload(doc: SettingsDoc) -> dict:
+            payload = doc.data if isinstance(doc.data, dict) else {}
+            if payload:
+                return payload
+            return {
+                "name": doc.name,
+                "content": doc.content,
+                "category": doc.category,
+            }
+
+        canonical = {field: render_docs(field) for field in grouped_docs}
+        all_knowledge = {
+            field: [doc_payload(doc) for doc in docs]
+            for field, docs in grouped_docs.items()
+        }
         return {
             "rag_context": {
-                "world_state": "",
-                "character_state": "",
-                "foreshadowing": "",
-                "plot_threads": "",
+                "world_state": canonical["world_state"],
+                "character_state": canonical["character_state"],
+                "foreshadowing": canonical["foreshadowing"],
+                "plot_threads": canonical["plot_threads"],
                 "chapter_extracts": "",
             },
-            "all_knowledge": {},
-            "world_state": "",
-            "character_state": "",
-            "foreshadowing": "",
-            "plot_threads": "",
+            "all_knowledge": all_knowledge,
+            "world_state": canonical["world_state"],
+            "character_state": canonical["character_state"],
+            "foreshadowing": canonical["foreshadowing"],
+            "plot_threads": canonical["plot_threads"],
             "character_manifest_context": await build_planner_manifest_context(
                 db,
                 project_id,
@@ -513,6 +579,16 @@ class MemoryManager:
                 "source_chapter": previous_source_chapter,
                 "authority": "accepted" if previous_source_chapter else "unknown",
             },
+            "short_term_context": {
+                "source_ref": "chapters:short_term_summary",
+                "source_chapter": previous_source_chapter,
+                "authority": "published_summary",
+            },
+            "full_manuscript_context": {
+                "source_ref": "chapters:manuscript_suffix",
+                "source_chapter": previous_source_chapter,
+                "authority": "published",
+            },
             "chapter_contract_context": {
                 "source_ref": f"chapter:{chapter_index}:contract",
                 "source_chapter": chapter_index,
@@ -536,6 +612,12 @@ class MemoryManager:
                 "authority": "retrieved_advisory",
             },
         }
+        for field in ("world_state", "character_state", "foreshadowing", "plot_threads"):
+            if knowledge_context[field]:
+                context_sources[field] = {
+                    "source_ref": f"settings_docs:{field}",
+                    "authority": "canonical_legacy",
+                }
 
         return {
             "agent_type": agent_type,

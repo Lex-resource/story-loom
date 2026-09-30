@@ -14,6 +14,7 @@ from models.novel import Chapter, ChapterOutline, RawIssue
 from services.pipeline_transitions import set_chapter_pipeline_step
 from services.pipeline_types import PipelineStep
 from core.pipeline_vocab import ChapterStatus
+from services.chapter_content import effective_chapter_content
 
 
 async def get_chapter_by_index(
@@ -47,7 +48,8 @@ async def get_or_create_chapter(
     *,
     title: str,
     outline: dict[str, Any] | None = None,
-) -> Chapter:
+    domain: ChapterDomain | None = None,
+) -> Chapter | CharacterBranchChapter:
     if domain is not None and domain.branch_id is not None:
         return await _get_or_create_branch_chapter(
             db, domain, chapter_index, title=title, outline=outline
@@ -144,7 +146,7 @@ async def get_succeeding_chapter_beginning(
     domain: ChapterDomain | None = None,
 ) -> str:
     chapter = await get_chapter_by_index(db, novel_id, chapter_index + 1, domain=domain)
-    return chapter.content[:max_chars] if chapter and chapter.content else ""
+    return effective_chapter_content(chapter)[:max_chars]
 
 
 async def load_existing_outline(

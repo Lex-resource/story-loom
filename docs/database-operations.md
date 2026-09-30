@@ -25,7 +25,7 @@ Migration 失败时服务不会继续启动。禁止恢复启动时 `Base.metada
 
 角色支线在创建时冻结主线锚点上下文，支线状态和正文只写入支线表。支线不更新 `chapters`、`character_cards`、`character_chapter_states`、`character_relationships` 或主线统计；删除项目时由外键级联删除支线数据。支线章节通过 `VectorOutbox` 投影到以支线 ID 命名的独立向量集合，主线检索不读取该集合，归档时清理集合。`character_branch_auto_discovery_enabled` 默认关闭，开启后只允许候选发现，不自动生成正文。
 
-Prompt 模板运行时以 PostgreSQL `prompt_templates` 为权威来源。源码 JSON 只负责缺失模板的种子，不能覆盖用户在系统配置页面的编辑；更新内置 Prompt 后，现有数据库需要通过系统配置或定向数据迁移显式同步。
+Prompt 模板运行时以 PostgreSQL `prompt_templates` 为唯一来源。Alembic 的 `c5d6e7f8a9b0` 迁移为新数据库补齐内置模板，只插入缺失的 `(name, category)`，不会覆盖用户编辑；后续内置 Prompt 更新通过系统配置或新的定向数据迁移同步。应用启动只检查必需模板，不再读取仓库中的提示词文件。
 
 ## 日常检查
 

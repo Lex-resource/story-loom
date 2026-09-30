@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.novel import Chapter
 from models.novel_memory import NovelMemoryAtom, NovelSceneBlock
+from services.chapter_content import effective_chapter_content
 from services.context_compaction import compact_json, compact_text
 from services.novel_memory_types import ATOM_STATUS_ACCEPTED, STORYLINE_MAIN
 from services.chapter_handoff_formatting import ChapterHandoffFormattingMixin
@@ -179,6 +180,7 @@ def writer_execution_brief(
     max_chars: int = 4200,
     novel_format: str | None = None,
     outline: dict[str, Any] | None = None,
+    fallback_previous_ending: str = "",
 ) -> str:
     """Project continuity inputs into one narrative-facing Writer brief.
 
@@ -254,7 +256,9 @@ def writer_execution_brief(
     payload = {
         "opening": {
             "previous_ending": compact_text(
-                handoff_data.get("exact_ending"), 1200, tail_chars=780
+                handoff_data.get("exact_ending") or fallback_previous_ending,
+                1200,
+                tail_chars=780,
             ),
             "scene": scene_projection,
             "characters_present": text_list(
@@ -665,7 +669,7 @@ async def build_chapter_handoff(
         )
 
     outline = _as_dict(previous.outline)
-    content = previous.content or previous.edited_content or previous.draft_content or ""
+    content = effective_chapter_content(previous)
     ending = previous_ending or content[-1800:]
 
     atoms = list((await db.scalars(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +29,7 @@ from services.validator import analyze_style
 from services.experiment_recorder import record_event
 from services.continuity_contract import prompt_outline_for_agent
 from services.quality_metrics import quality_summary
+from core.chapter_domain import ChapterDomain
 from core.pipeline_vocab import ChapterStatus
 
 
@@ -64,6 +66,28 @@ class PostEditValidationOutcome:
     validation_errors: str
     should_continue: bool
     a5_polisher_used: bool
+
+
+def _editor_repair_context_kwargs(memory_context: dict) -> dict[str, str]:
+    """Pass the same continuity context to every Editor repair surface."""
+    keys = (
+        "global_outline",
+        "plot_threads",
+        "short_term_context",
+        "full_manuscript_context",
+        "character_card_context",
+        "novel_memory_context",
+        "narrative_index_context",
+        "chapter_handoff_context",
+        "chapter_contract_context",
+        "reference_style",
+    )
+    values = {key: str(memory_context.get(key) or "") for key in keys}
+    if isinstance(memory_context.get("global_outline"), dict):
+        values["global_outline"] = json.dumps(
+            memory_context["global_outline"], ensure_ascii=False
+        )
+    return values
 
 
 async def _run_a5_polisher(
@@ -107,6 +131,7 @@ async def _run_a5_polisher(
         validation_errors=errors,
         genre=memory_context.get("genre", ""),
         style=memory_context.get("style", ""),
+        **_editor_repair_context_kwargs(memory_context),
         on_chunk=on_chunk,
     )
     repaired = editor_edited_content(editor_result, final_text)
@@ -208,6 +233,7 @@ async def _run_v49_local_observation_repair(
         validation_errors=errors,
         genre=memory_context.get("genre", ""),
         style=memory_context.get("style", ""),
+        **_editor_repair_context_kwargs(memory_context),
         on_chunk=on_editor_chunk,
     )
     repaired = editor_edited_content(editor_result, edited_content)
@@ -252,6 +278,7 @@ async def _run_v54_local_action_repair(
         validation_errors=repair_plan.get("contract") or validation_errors_text(validator_result),
         genre=memory_context.get("genre", ""),
         style=memory_context.get("style", ""),
+        **_editor_repair_context_kwargs(memory_context),
         on_chunk=on_editor_chunk,
     )
     repaired = editor_edited_content(editor_result, edited_content)
@@ -610,6 +637,7 @@ async def run_style_repair(
         novel_format=novel.novel_format,
         genre=memory_context.get("genre", ""),
         style=memory_context.get("style", ""),
+        **_editor_repair_context_kwargs(memory_context),
         on_chunk=on_chunk,
     )
     await editor_node.agent.record_usage(db, novel.id, chapter_index, AGENT_EDITOR)
@@ -648,6 +676,9 @@ async def run_force_editor_revision(
         rewrite_reason=rewrite_reason,
         novel_format=novel.novel_format,
         validation_errors=validation_errors,
+        genre=memory_context.get("genre", ""),
+        style=memory_context.get("style", ""),
+        **_editor_repair_context_kwargs(memory_context),
         on_chunk=on_chunk,
     )
     await editor_node.agent.record_usage(db, novel.id, chapter_index, AGENT_EDITOR)

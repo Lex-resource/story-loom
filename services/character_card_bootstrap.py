@@ -9,6 +9,7 @@ from typing import Any
 from models.novel import Chapter, Novel
 from agents.constants import NOVEL_FORMAT_LONG_WEBNOVEL
 from services.character_types import CharacterCardUpdate
+from services.chapter_content import effective_chapter_content
 
 
 def _merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -82,7 +83,7 @@ async def generate_initial_character_updates(
             "novel_format": novel.novel_format or "",
             "current_chapter": chapter.chapter_index,
             "chapter_outline": chapter.outline or {},
-            "chapter_content": chapter.content or "",
+            "chapter_content": effective_chapter_content(chapter),
             "character_card_context": payload,
         },
         character_hints=_character_hints(payload, names),

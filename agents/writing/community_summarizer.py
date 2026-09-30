@@ -1,5 +1,6 @@
 from agents.base import AgentBase, sanitize_untrusted_content, UNTRUSTED_CONTENT_SYSTEM_REMINDER, safe_format
 from agents.constants import COMMUNITY_SUMMARIZER_TEMPERATURE, PROMPT_COMMUNITY_SUMMARIZER
+from agents.prompt_hints import append_missing_hints, hint_block
 
 class CommunitySummarizerAgent(AgentBase):
     def __init__(self):
@@ -19,6 +20,12 @@ class CommunitySummarizerAgent(AgentBase):
             user_tmpl,
             entities=sanitize_untrusted_content(entities_text),
             edges=sanitize_untrusted_content(edges_text),
+        )
+        user_prompt = append_missing_hints(
+            user_prompt,
+            user_tmpl,
+            entities=hint_block("【实体】", entities_text),
+            edges=hint_block("【关系】", edges_text),
         )
 
         return await self.call_llm_json(sys_prompt, user_prompt, temperature=COMMUNITY_SUMMARIZER_TEMPERATURE)

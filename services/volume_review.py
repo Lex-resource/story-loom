@@ -129,8 +129,7 @@ async def review_volume(db, novel, volume_index: int) -> dict | None:
         title=f"{novel.title}· {volume.get('卷名') or f'第{volume_index + 1}卷'}",
         outline=outline,
         manuscript=manuscript,
-        # `validator_review_full_story` 目前只存在于短篇模板集（prompts/validation/
-        # zhihu_short_validation.json）；长篇那份里没有这个名字。卷级通读复用它，因此这里
+        # `validator_review_full_story` 目前只存在于短篇模板集（数据库中的短篇模板）；长篇那份里没有这个名字。卷级通读复用它，因此这里
         # 只能显式指向短篇类别 —— 代价是长篇卷报告用的是短篇的审校维度（开篇承诺、伏笔
         # 公平性、情绪曲线、信息密度、结尾兑现）。给长篇写一份卷级专用模板是独立的一件事。
         category=NOVEL_FORMAT_ZHIHU_SHORT,

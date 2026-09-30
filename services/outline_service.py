@@ -11,6 +11,7 @@ from agents.pipeline import PlannerNode
 from services.novel_constants import API_STATUS_OK
 from services.context_compaction import compact_text
 from services.project_service import get_novel_or_raise
+from services.chapter_content import effective_chapter_content
 
 
 import logging
@@ -223,6 +224,8 @@ async def optimize_skeleton(
         summary = ""
         if ch.outline and isinstance(ch.outline, dict):
             summary = ch.outline.get("summary", "")
+        if not summary:
+            summary = effective_chapter_content(ch)[:800].strip()
         summaries_list.append(f"第{ch.chapter_index}章 {title}: {summary}")
     chapter_summaries = "\n".join(summaries_list)
 

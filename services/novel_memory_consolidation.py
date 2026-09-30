@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.constants import AGENT_SCENE_CONSOLIDATOR
+from services.chapter_content import effective_chapter_content
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ async def consolidate_scene_summary(
         summary = await agent.consolidate_scene_summary(
             novel_format=novel.novel_format,
             chapter_title=chapter.title or "",
-            chapter_tail=(chapter.content or "")[-1500:],
+            chapter_tail=effective_chapter_content(chapter)[-1500:],
             accepted_atoms=atom_statements,
             outline_summary=fallback_summary,
         )

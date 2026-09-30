@@ -204,6 +204,8 @@ def compact_json(value: Any, max_chars: int, *, label: str = "context") -> str:
 def memory_context_breakdown(context: Any) -> dict[str, int]:
     """Return the compact memory fields actually carried by an agent context."""
     fields = (
+        "short_term_context",
+        "full_manuscript_context",
         "novel_memory_context",
         "narrative_index_context",
         "chapter_handoff_context",

@@ -184,6 +184,14 @@ class PipelineContext:
             "foreshadowing": self.foreshadowing,
             "plot_threads": self.plot_threads,
             "previous_ending": self.previous_ending,
+            "short_term_context": self.short_term_context,
+            "full_manuscript_context": self.full_manuscript_context,
+            "novel_memory_context": self.novel_memory_context,
+            "narrative_index_context": self.narrative_index_context,
+            "chapter_handoff_context": self.chapter_handoff_context,
+            "chapter_contract_context": self.chapter_contract_context,
+            "writer_execution_brief_context": self.writer_execution_brief_context,
+            "vector_context": self.vector_context,
         }
 
     def to_context_data(self) -> ContextData:
@@ -311,6 +319,8 @@ class PipelineContext:
             "chapter_handoff_context": self.chapter_handoff_context,
             "chapter_contract_context": self.chapter_contract_context,
             "writer_execution_brief_context": self.writer_execution_brief_context,
+            "short_term_context": self.short_term_context,
+            "full_manuscript_context": self.full_manuscript_context,
             "character_manifest_context": self.character_manifest_context,
             "character_card_context": self.character_card_context,
             "novel_memory_context": self.novel_memory_context,

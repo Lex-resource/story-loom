@@ -229,7 +229,12 @@ async def run_context_refresh(state: ChapterRunState, node: Any = None) -> str:
     else 分支里，等价但看不出意图。
     """
     writer_context = await load_writer_context(
-        state.db, state.novel, state.chapter_index, state.outline
+        state.db,
+        state.novel,
+        state.chapter_index,
+        state.outline,
+        domain=state.domain,
+        base_context=state.pipeline_context,
     )
     state.memory = writer_context.memory
     state.memory["chapter_outline"] = state.outline
@@ -533,6 +538,8 @@ async def run_final(state: ChapterRunState, node: Any = None) -> str:
                 state.chapter_index,
                 validator_agent,
                 on_validator_chunk=state.validator_cb,
+                domain=state.domain,
+                base_context=state.pipeline_context,
             )
 
     state.validator_result = await run_final_validator_flow(

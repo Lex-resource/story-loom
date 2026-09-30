@@ -45,6 +45,7 @@ from services.character_branch_service import (
     get_character_branch,
 )
 from services.character_branch_vector_service import enqueue_branch_chapter_vector
+from services.chapter_content import effective_chapter_content
 from services.chapter_graph import branch_default_graph
 from services.novel_memory_consolidation import consolidate_scene_summary
 from services.novel_memory_evidence import capture_branch_generation_evidence
@@ -72,7 +73,7 @@ async def _prepare_branch_state(
     """阶段 1:支线上下文(锚点快照 + 前章)→ 支线域召回 → 域/运行时/planner
     输入 → 图运行状态。"""
     context = _branch_context(branch, chapter, novel, previous)
-    context.chapter_content = chapter.content or ""
+    context.chapter_content = effective_chapter_content(chapter)
     if settings.ENABLE_NOVEL_MEMORY_RECALL:
         # A2:支线自身累积记忆的召回(锚点前的主线记忆已冻结在
         # anchor_context);续写章节据此看到前几章支线事实。
@@ -101,6 +102,33 @@ async def _prepare_branch_state(
         domain=domain,
         previous_ending_override=context.previous_ending,
     )
+    # Branch recall intentionally returns only branch-scoped atoms. Preserve
+    # the frozen anchor projection when building the Planner context so it
+    # cannot silently lose the branch's format, character, and world surface.
+    for field in (
+        "novel_format",
+        "genre",
+        "style",
+        "world_state",
+        "character_state",
+        "raw_world_state",
+        "raw_character_state",
+        "foreshadowing",
+        "raw_foreshadowing",
+        "plot_threads",
+        "raw_plot_threads",
+        "character_card_context",
+        "character_manifest_context",
+        "global_outline",
+        "context_sources",
+        "total_chapters",
+    ):
+        value = getattr(context, field, None)
+        if value not in (None, "", {}, []):
+            planner_inputs.memory[field] = value
+    if context.character_card_context:
+        planner_inputs.memory["character_manifest_context"] = context.character_card_context
+    planner_inputs.memory["previous_ending"] = planner_inputs.previous_ending
     from worker_support.generate_job_runner import _bind_stream_callbacks
 
     state = ChapterRunState(
@@ -144,6 +172,7 @@ async def _complete_branch_chapter(
     除 db 事务外全部 best-effort:场景块/向量失败不阻塞支线发布。
     """
     chapter = state.chapter
+    chapter_content = effective_chapter_content(chapter)
     outline = chapter.outline if isinstance(chapter.outline, dict) else {}
     chapter.state_data = {
         "last_observed_chapter": next_index,
@@ -164,7 +193,7 @@ async def _complete_branch_chapter(
             branch_id=branch.id,
             storyline_id=branch.storyline_id,
             chapter_index=next_index,
-            chapter_content=chapter.content or "",
+            chapter_content=chapter_content,
             generation_data={
                 "title": chapter.title,
                 "outline": outline,
@@ -175,7 +204,7 @@ async def _complete_branch_chapter(
     if settings.ENABLE_NOVEL_MEMORY_SCENE_BLOCKS:
         try:
             async with db.begin_nested():
-                branch_summary = fallback_scene_summary(chapter.outline, chapter.content)
+                branch_summary = fallback_scene_summary(chapter.outline, chapter_content)
                 if settings.ENABLE_SCENE_BLOCK_CONSOLIDATION:
                     branch_summary = (
                         await consolidate_scene_summary(

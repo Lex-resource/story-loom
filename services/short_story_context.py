@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from services.chapter_content import effective_chapter_content
+
 TRUNCATION_MARKER = "【前文开头因上下文预算已截断】"
 
 
@@ -15,7 +17,7 @@ def build_short_manuscript_context(chapters: list, *, max_chars: int) -> str:
     """Render all available prior short-story sections within a hard budget."""
     blocks = []
     for chapter in chapters:
-        content = chapter.content or chapter.edited_content or chapter.draft_content or ""
+        content = effective_chapter_content(chapter)
         if not content:
             continue
         blocks.append(f"{short_block_prefix(chapter.chapter_index, chapter.title)}{content.strip()}")
